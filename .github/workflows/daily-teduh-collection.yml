@@ -1,0 +1,44 @@
+name: Daily TEDUH collection
+
+on:
+  schedule:
+    # 08:30 Malaysia time (UTC+8); GitHub may start scheduled jobs late during busy periods.
+    - cron: '30 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-teduh-collection
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Collect and validate TEDUH sales snapshots
+        run: node scripts/collect_teduh.mjs
+
+      - name: Commit dated history
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/teduh-history.json
+          if git diff --cached --quiet; then
+            echo 'No history changes to commit.'
+          else
+            git commit -m "Update daily TEDUH sales history"
+            git push
+          fi
