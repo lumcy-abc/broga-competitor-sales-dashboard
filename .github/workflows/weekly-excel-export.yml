@@ -1,0 +1,45 @@
+name: Weekly Competitor Excel Export
+
+on:
+  schedule:
+    # 09:00 Malaysia time every Monday (01:00 UTC), after the daily collection job.
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install workbook dependency
+        run: npm install --no-save exceljs
+
+      - name: Generate horizontal workbook from history
+        run: node scripts/export_competitor_workbook.mjs
+
+      - name: Save workbook as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Broga-Competitor-Sales-Analysis
+          path: Broga_Competitor_Sales_Analysis.xlsx
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Replace the shared OneDrive analysis workbook
+        env:
+          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
+          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
+          MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
+          ONEDRIVE_DRIVE_ID: ${{ secrets.ONEDRIVE_DRIVE_ID }}
+          ONEDRIVE_ITEM_PATH: ${{ vars.ONEDRIVE_ITEM_PATH }}
+        run: node scripts/upload_to_onedrive.mjs
