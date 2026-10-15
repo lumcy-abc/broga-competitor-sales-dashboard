@@ -1,16 +1,16 @@
-name: Daily TEDUH collection
+name: Weekly TEDUH collection
 
 on:
   schedule:
-    # 08:30 Malaysia time (UTC+8); GitHub may start scheduled jobs late during busy periods.
-    - cron: '30 0 * * *'
+    # Every Monday at 08:30 Malaysia time (00:30 UTC). GitHub may start scheduled jobs late.
+    - cron: '30 0 * * 1'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: daily-teduh-collection
+  group: weekly-teduh-collection
   cancel-in-progress: false
 
 jobs:
@@ -39,6 +39,6 @@ jobs:
           if git diff --cached --quiet; then
             echo 'No history changes to commit.'
           else
-            git commit -m "Update daily TEDUH sales history"
+            git commit -m "Update weekly TEDUH sales history"
             git push
           fi
