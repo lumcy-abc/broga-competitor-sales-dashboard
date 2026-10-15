@@ -246,11 +246,11 @@ hs.views = [{ state: 'frozen', ySplit: 1, topLeftCell: 'A2', zoomScale: 90 }];
 const histHeaders = ['Record Date','Project','Unit Group / Layout','Status Type','Signed Units','Total Units','Signed %','Raw Recorded Status','Source'];
 hs.addRow(histHeaders);
 hs.getRow(1).height = 30;
-for (const cell of hs.getRow(1).eachCell()) {
+hs.getRow(1).eachCell((cell) => {
   cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
   cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: navy } };
   cell.alignment = { vertical: 'middle', wrapText: true };
-}
+});
 for (const r of history) {
   const comps = r.components ?? [];
   if (!comps.length) {
@@ -293,4 +293,3 @@ for (let r = 1; r <= readme.rowCount; r++) {
 
 await wb.xlsx.writeFile(OUT_PATH);
 console.log(`Created ${OUT_PATH} from ${history.length} merged dated project records.`);
-
