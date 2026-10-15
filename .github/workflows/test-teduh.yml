@@ -1,0 +1,77 @@
+
+name: Test TEDUH API access
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-api:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check TEDUH endpoints
+        env:
+          ENDPOINTS: |
+            https://teduh.kpkt.gov.my/api/unit-projek-swasta/20094-4
+            https://teduh.kpkt.gov.my/api/unit-projek-swasta/20094-5
+            https://teduh.kpkt.gov.my/api/unit-projek-swasta/19321-4
+            https://teduh.kpkt.gov.my/api/unit-projek-swasta/19959-3
+            https://teduh.kpkt.gov.my/api/unit-projek-swasta/30897-1
+            https://teduh.kpkt.gov.my/api/unit-projek-swasta/30897-2
+            https://teduh.kpkt.gov.my/api/unit-projek-swasta/30897-3
+            https://teduh.kpkt.gov.my/api/unit-projek-swasta/13170-7
+            https://teduh.kpkt.gov.my/api/unit-projek-swasta/19150-17
+            https://teduh.kpkt.gov.my/api/unit-projek-swasta/14421-21
+            https://teduh.kpkt.gov.my/api/unit-projek-swasta/14421-22
+            https://teduh.kpkt.gov.my/api/unit-projek-swasta/6868-20
+        run: |
+          node <<'NODE'
+          const urls = process.env.ENDPOINTS.trim().split(/\s+/);
+
+          (async () => {
+            let failed = 0;
+
+            for (const url of urls) {
+              try {
+                const response = await fetch(url, {
+                  headers: { Accept: 'application/json' },
+                  signal: AbortSignal.timeout(20000)
+                });
+
+                const text = await response.text();
+                let jsonOK = false;
+                let unitGroups = null;
+
+                try {
+                  const data = JSON.parse(text);
+                  jsonOK = true;
+                  const groups = data?.unitGroups ?? data?.data?.unitGroups;
+                  unitGroups = Array.isArray(groups) ? groups.length : null;
+                } catch {}
+
+                const ok = response.ok && jsonOK;
+                if (!ok) failed++;
+
+                console.log(JSON.stringify({
+                  endpoint: url.split('/').pop(),
+                  httpStatus: response.status,
+                  validJSON: jsonOK,
+                  unitGroups,
+                  result: ok ? 'PASS' : 'FAIL'
+                }));
+              } catch (error) {
+                failed++;
+                console.log(JSON.stringify({
+                  endpoint: url.split('/').pop(),
+                  result: 'FAIL',
+                  error: error.message
+                }));
+              }
+            }
+
+            console.log(`Summary: ${urls.length - failed}/${urls.length} endpoints passed`);
+            if (failed) process.exitCode = 1;
+          })();
+          NODE
