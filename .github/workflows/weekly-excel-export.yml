@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   export-and-publish:
@@ -34,6 +34,18 @@ jobs:
           path: Broga_Competitor_Sales_Analysis.xlsx
           if-no-files-found: error
           retention-days: 30
+          
+      - name: Publish Excel workbook for dashboard download
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Broga_Competitor_Sales_Analysis.xlsx
+          if git diff --cached --quiet; then
+            echo "Workbook is unchanged."
+          else
+            git commit -m "Update downloadable competitor analysis workbook"
+            git push
+          fi
 
       - name: Replace the shared OneDrive analysis workbook
         env:
