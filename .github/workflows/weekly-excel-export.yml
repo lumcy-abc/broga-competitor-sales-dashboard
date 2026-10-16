@@ -3,7 +3,7 @@ name: Weekly Competitor Excel Export
 on:
   schedule:
     # 09:00 Malaysia time every Monday (01:00 UTC), after the daily collection job.
-    - cron: '0 1 * * 1'
+    - cron: '40 0 * * 1'
   workflow_dispatch:
 
 permissions:
