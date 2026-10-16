@@ -46,12 +46,3 @@ jobs:
             git commit -m "Update downloadable competitor analysis workbook"
             git push
           fi
-
-      - name: Replace the shared OneDrive analysis workbook
-        env:
-          MS_TENANT_ID: ${{ secrets.MS_TENANT_ID }}
-          MS_CLIENT_ID: ${{ secrets.MS_CLIENT_ID }}
-          MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
-          ONEDRIVE_DRIVE_ID: ${{ secrets.ONEDRIVE_DRIVE_ID }}
-          ONEDRIVE_ITEM_PATH: ${{ vars.ONEDRIVE_ITEM_PATH }}
-        run: node scripts/upload_to_onedrive.mjs
