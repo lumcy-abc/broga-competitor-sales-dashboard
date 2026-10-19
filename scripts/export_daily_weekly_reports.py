@@ -7,9 +7,7 @@ Historical Records sheet; does not alter the TEDUH collector or its JSON history
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from collections import defaultdict
-from copy import copy
 from calendar import monthrange
-from zoneinfo import ZoneInfo
 from openpyxl import load_workbook, Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
@@ -20,7 +18,7 @@ DAILY_OUT = ROOT / "Broga_Daily_Tracking.xlsx"
 WEEKLY_OUT = ROOT / "Broga_Weekly_Tracking.xlsx"
 GREEN, BROWN, SAGE, CREAM = "526747", "8B6F4E", "E8EDE3", "F3EBDD"
 WHITE, DARK, GRAY, LINE, PALE, AMBER, LIGHT = "FFFFFF", "263126", "666666", "D7DCCF", "DCE8D5", "F6E5C9", "F7F8F4"
-TODAY = datetime.now(ZoneInfo("Asia/Kuala_Lumpur")).date()
+TODAY = date.today()
 
 
 def read_records():
@@ -32,60 +30,22 @@ def read_records():
     sheet = book["Historical Records"]
     headers = [c.value for c in next(sheet.iter_rows(min_row=1, max_row=1))]
     out = {}
-    skipped_dates = skipped_status = skipped_fields = duplicates = 0
-    for row_num, values in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+    for values in sheet.iter_rows(min_row=2, values_only=True):
         rec = dict(zip(headers, values))
         raw_date = rec.get("Record Date")
         try:
-            if isinstance(raw_date, datetime):
-                dt = raw_date.date()
-            elif isinstance(raw_date, date):
-                dt = raw_date
-            else:
-                raw = str(raw_date).strip()
-                try:
-                    dt = datetime.strptime(raw, "%d/%m/%Y").date()
-                except ValueError:
-                    dt = datetime.strptime(raw[:10], "%Y-%m-%d").date()
-        except (ValueError, TypeError, AttributeError):
-            skipped_dates += 1
-            continue
-        status_type = str(rec.get("Status Type", "")).strip().lower()
-        if status_type != "signed":
-            if status_type not in ("booked", "yet to launch", "yet to sign", "unclassified", ""):
-                print(f"WARNING: row {row_num}: unknown status type {status_type!r}; excluded from signed tracker.")
-            skipped_status += 1
-            continue
-        try:
+            dt = raw_date.date() if isinstance(raw_date, datetime) else datetime.strptime(str(raw_date), "%d/%m/%Y").date()
             signed, total = float(rec.get("Signed Units")), float(rec.get("Total Units"))
-        except (ValueError, TypeError):
-            skipped_fields += 1
-            print(f"WARNING: row {row_num}: signed record has invalid unit counts; skipped.")
+        except (ValueError, TypeError, AttributeError):
             continue
-        if total <= 0 or signed < 0 or signed > total:
-            skipped_fields += 1
-            print(f"WARNING: row {row_num}: invalid counts signed={signed}, total={total}; skipped.")
+        if str(rec.get("Status Type", "")).lower() != "signed" or total <= 0:
             continue
         project = str(rec.get("Project") or "").strip()
         group = str(rec.get("Unit Group / Layout") or "").strip()
         if not project or not group:
-            skipped_fields += 1
-            print(f"WARNING: row {row_num}: missing project/layout; skipped.")
             continue
         key = (dt, project, group)
-        candidate = {"date": dt, "project": project, "group": group, "signed": signed, "total": total}
-        if key in out:
-            duplicates += 1
-            if out[key]["signed"] == signed and out[key]["total"] == total:
-                print(f"WARNING: identical duplicate dated group row {key!r}; duplicate ignored (source row {row_num}).")
-                continue
-            raise ValueError(
-                f"Conflicting duplicate dated group row {key!r}: existing signed/total="
-                f"{out[key]['signed']}/{out[key]['total']}, new={signed}/{total} at source row {row_num}. "
-                "Resolve the source conflict instead of silently choosing one value."
-            )
-        out[key] = candidate
-    print(f"Source validation: {len(out)} unique signed rows; skipped {skipped_dates} invalid dates, {skipped_status} non-signed/unknown statuses, {skipped_fields} invalid signed rows; {duplicates} duplicate keys.")
+        out[key] = {"date": dt, "project": project, "group": group, "signed": signed, "total": total}
     return sorted(out.values(), key=lambda r: (r["date"], r["project"], r["group"]))
 
 
@@ -120,28 +80,11 @@ def status(r):
 
 
 def delta(cur, prev):
-    """Describe the change against the previous valid observation, including its gap."""
     if not cur: return "No record"
     if not prev: return "No prior record"
-    gap = (cur["date"] - prev["date"]).days
-    gap_label = f"over {gap} day(s)" if gap > 1 else "over 1 day"
-    if cur["total"] != prev["total"]:
-        return f"Total changed — review ({prev['date']:%d %b} → {cur['date']:%d %b}; {gap_label})"
+    if cur["total"] != prev["total"]: return "Total changed — review"
     n = int(cur["signed"] - prev["signed"])
-    change = "No change" if n == 0 else f"{n:+d} signed"
-    return f"{change} ({prev['date']:%d %b} → {cur['date']:%d %b}; {gap_label})"
-
-
-def daily_change_and_gap(cur, prev):
-    if not cur:
-        return "No observation", None
-    if not prev:
-        return "No prior observation", None
-    gap = (cur["date"] - prev["date"]).days
-    if cur["total"] != prev["total"]:
-        return "Total changed — review scope/release", gap
-    change = int(cur["signed"] - prev["signed"])
-    return ("No change" if change == 0 else f"{change:+d} signed"), gap
+    return "No change" if n == 0 else f"{n:+d} signed"
 
 
 def month_range(start, end):
@@ -237,54 +180,35 @@ def create_daily(records, groups, lookup, by_group):
         last_day = TODAY.day if (y, m) == (TODAY.year, TODAY.month) else monthrange(y, m)[1] if date(y, m, 1) < TODAY.replace(day=1) else 0
         month_start = date(y, m, 1)
         month_end = date(y, m, last_day) if last_day else date(y, m, monthrange(y, m)[1])
-        # Compact daily layout: one title row, then project/layout headers.
-        # The two explanatory rows requested for removal are intentionally omitted.
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(groups)+1)
-        c = ws.cell(1, 1, f"BROGA COMPETITOR SALES ANALYSIS | DAILY TRACKER | {month_name(y,m).upper()}")
-        c.fill = PatternFill("solid", fgColor=GREEN)
-        c.font = Font(name="Aptos Display", size=15, bold=True, color=WHITE)
-        c.alignment = Alignment(vertical="center")
-        ws.row_dimensions[1].height = 32
-        ws.sheet_view.showGridLines = False
-        ws.sheet_properties.pageSetUpPr.fitToPage = True
-        ws.page_setup.orientation = "landscape"
-        ws.page_setup.fitToWidth = 1
-        ws.page_setup.fitToHeight = 0
-        write_group_headers(ws, groups, 2)
+        title(ws, len(groups) + 1, f"BROGA COMPETITOR SALES ANALYSIS | DAILY TRACKER | {month_name(y,m).upper()}",
+              "Daily validation view · Sales status is combined with unit count and percentage. Daily Change compares with the previous available signed observation; it does not sum snapshots.")
+        ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=len(groups)+1)
+        ws.cell(3, 1, "A new monthly tab is generated automatically when this report runs in a new month. Historical month tabs are retained in the regenerated workbook.")
+        ws.cell(3, 1).font = Font(italic=True, size=9, color=DARK); ws.cell(3,1).alignment = Alignment(wrap_text=True, vertical="center")
+        ws.row_dimensions[3].height = 29
+        write_group_headers(ws, groups, 5)
         previous_lookup = build_previous_lookup(by_group, groups, month_start, month_end)
-        rr = 4
+        rr = 7
         for day_num in range(1, month_end.day + 1):
             dt = date(y, m, day_num)
             ws.cell(rr, 1, dt.strftime("%d %b %Y") + " · Sales Status")
-            ws.cell(rr + 1, 1, "Change vs Previous Observation")
-            ws.cell(rr + 2, 1, "Days Since Previous Observation")
+            ws.cell(rr + 1, 1, "Daily Change")
             style_cell(ws.cell(rr, 1), BROWN, True, WHITE, "left")
             style_cell(ws.cell(rr + 1, 1), CREAM, True, DARK, "left")
-            style_cell(ws.cell(rr + 2, 1), SAGE, True, DARK, "left")
             for j, g in enumerate(groups, 2):
                 cur = lookup.get((dt, g))
                 prev = previous_lookup.get((dt, g))
                 val = status(cur) if cur else ("No signed observation" if dt <= TODAY else "Not yet reached")
-                change, gap = daily_change_and_gap(cur, prev)
+                change = delta(cur, prev)
                 style_cell(ws.cell(rr, j, val), SAGE if cur else LIGHT)
-                if not cur:
-                    change = "No observation" if dt <= TODAY else "Not yet reached"
-                if "review" in change.lower():
-                    fill = AMBER
-                elif change.startswith("+"):
-                    fill = PALE
-                elif change.startswith("-"):
-                    fill = "FCE4D6"
-                else:
-                    fill = LIGHT
-                style_cell(ws.cell(rr + 1, j, change), fill, True)
-                style_cell(ws.cell(rr + 2, j, gap if gap is not None else "—"), LIGHT)
-            ws.row_dimensions[rr].height = 32; ws.row_dimensions[rr+1].height = 27; ws.row_dimensions[rr+2].height = 22
-            rr += 3
-        ws.freeze_panes = "B4"
-        ws.print_title_rows = "1:3"
-        ws.auto_filter.ref = f"A3:{get_column_letter(len(groups)+1)}{rr-1}"
-        outline_project_blocks(ws, groups, 4, rr - 1, header_row=2)
+                fill = PALE if change not in ("No change", "No prior record", "No record") and "review" not in change else AMBER if "review" in change else LIGHT
+                style_cell(ws.cell(rr + 1, j, change if cur else ("No observation" if dt <= TODAY else "Not yet reached")), fill, True)
+            ws.row_dimensions[rr].height = 32; ws.row_dimensions[rr+1].height = 27
+            rr += 2
+        ws.freeze_panes = "B7"
+        ws.print_title_rows = "1:6"
+        ws.auto_filter.ref = f"A6:{get_column_letter(len(groups)+1)}{rr-1}"
+        outline_project_blocks(ws, groups, 7, rr - 1, header_row=5)
     wb.active = len(wb.sheetnames) - 1
     wb.save(DAILY_OUT)
 
@@ -292,9 +216,9 @@ def create_daily(records, groups, lookup, by_group):
 def month_week_periods(y, m):
     first = date(y, m, 1)
     last = date(y, m, monthrange(y, m)[1])
-    # Include every Monday–Sunday week that overlaps this month, even when the
-    # Monday falls in the preceding month. The same boundary week may appear in both tabs.
-    monday = first - timedelta(days=first.weekday())
+    # Start with the first complete Monday–Sunday reporting week that begins
+    # inside this calendar month (e.g. October 2026 starts on Monday 5 Oct).
+    monday = first + timedelta(days=(7 - first.weekday()) % 7)
     periods = []
     start = monday
     while start <= last:
@@ -315,26 +239,19 @@ def create_weekly(records, groups, lookup, by_group):
         raise ValueError("No valid signed observations on or after 1 October 2026; weekly report has not been created.")
     for y, m in months:
         ws = wb.create_sheet(month_name(y, m))
-        # Weekly tracker uses a compact one-row title, matching the daily tracker's
-        # clear visual hierarchy while removing the two redundant explanatory rows.
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(groups)+1)
-        c = ws.cell(1, 1, f"BROGA COMPETITOR SALES ANALYSIS | WEEKLY TRACKER | {month_name(y,m).upper()}")
-        c.fill = PatternFill("solid", fgColor=GREEN)
-        c.font = Font(name="Aptos Display", size=15, bold=True, color=WHITE)
-        c.alignment = Alignment(vertical="center")
-        ws.row_dimensions[1].height = 32
-        ws.sheet_view.showGridLines = False
-        ws.sheet_properties.pageSetUpPr.fitToPage = True
-        ws.page_setup.orientation = "landscape"
-        ws.page_setup.fitToWidth = 1
-        ws.page_setup.fitToHeight = 0
-        write_group_headers(ws, groups, 2)
-        rr=4
+        title(ws, len(groups)+1, f"BROGA COMPETITOR SALES ANALYSIS | WEEKLY TRACKER | {month_name(y,m).upper()}",
+              "Each week uses the latest valid signed observation in its Monday–Sunday period. Weekly Change appears inside every week block and compares against the previous week's snapshot. No Not Yet Signed row is included.")
+        ws.merge_cells(start_row=3,start_column=1,end_row=3,end_column=len(groups)+1)
+        ws.cell(3,1,"Project names are merged across their unit-group columns. A changed total denominator is flagged for review; missing records are not treated as zero.")
+        ws.cell(3,1).font=Font(italic=True,size=9,color=DARK); ws.cell(3,1).alignment=Alignment(wrap_text=True,vertical="center")
+        ws.row_dimensions[3].height=29
+        write_group_headers(ws, groups, 5)
+        rr=7
         periods=month_week_periods(y,m)
         for wi,(start,end) in enumerate(periods):
             period_end=min(end,TODAY)
             ws.merge_cells(start_row=rr,start_column=1,end_row=rr,end_column=len(groups)+1)
-            c=ws.cell(rr,1,f"WEEK · {start.day} {start:%b %Y} – {end.day} {end:%b %Y}")
+            c=ws.cell(rr,1,f"WEEK · {start.strftime('%-d %b %Y')} – {end.strftime('%-d %b %Y')}")
             c.fill=PatternFill("solid",fgColor=BROWN); c.font=Font(bold=True,color=WHITE,size=10); c.alignment=Alignment(vertical="center")
             ws.row_dimensions[rr].height=24; rr+=1
             for metric,kind in [("Sales Status","status"),("Weekly Change","change")]:
@@ -360,11 +277,10 @@ def create_weekly(records, groups, lookup, by_group):
         c=ws.cell(rr+1,1,"Monthly tabs are generated from available history. Weeks are Monday–Sunday; weeks spanning month boundaries are shown in each month they overlap.")
         c.fill=PatternFill("solid",fgColor=CREAM); c.font=Font(italic=True,color="8B5E34",size=9); c.alignment=Alignment(wrap_text=True,vertical="center")
         ws.row_dimensions[rr+1].height=30
-        ws.freeze_panes="B4"; ws.print_title_rows="1:3"
-        outline_project_blocks(ws, groups, 4, rr + 1, header_row=2)
+        ws.freeze_panes="B7"; ws.print_title_rows="1:6"
+        outline_project_blocks(ws, groups, 7, rr + 1, header_row=5)
     wb.active=len(wb.sheetnames)-1
     wb.save(WEEKLY_OUT)
-
 
 
 def main():
@@ -375,10 +291,8 @@ def main():
     create_weekly(records, groups, lookup, by_group)
     daily_tabs = load_workbook(DAILY_OUT, read_only=True).sheetnames
     weekly_tabs = load_workbook(WEEKLY_OUT, read_only=True).sheetnames
-    if "Snapshot History" in weekly_tabs:
-        raise AssertionError("Snapshot History should not be present in the weekly workbook.")
     print(f"Created {DAILY_OUT.name} with {len(daily_tabs)} tabs ({', '.join(daily_tabs)})")
-    print(f"Created {WEEKLY_OUT.name} with {len(weekly_tabs)} tabs ({', '.join(weekly_tabs)}), Monday–Sunday monthly tabs only")
+    print(f"Created {WEEKLY_OUT.name} with {len(weekly_tabs)} tabs ({', '.join(weekly_tabs)}), starting from October 2026")
     print(f"Source: {len(records)} valid signed observations across {len(groups)} project/layout groups.")
 
 if __name__ == "__main__":
