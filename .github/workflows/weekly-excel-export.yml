@@ -1,0 +1,118 @@
+name: Daily and Weekly Competitor Excel Refresh
+
+on:
+  workflow_run:
+    workflows: ["Daily TEDUH collection"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: broga-competitor-workbook-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  export-and-publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out latest main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify latest TEDUH collection is complete and current
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const p = JSON.parse(fs.readFileSync('data/teduh-history.json', 'utf8'));
+          const r = p.lastRun;
+          if (!r || !r.date) throw new Error('No collection-run metadata found. Refusing to publish a potentially stale workbook.');
+          const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kuala_Lumpur', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+          const failed = Array.isArray(r.failed) ? r.failed : [];
+          const attempted = Number(r.attempted ?? 0);
+          const succeeded = Number(r.succeeded ?? 0);
+          if (r.date !== today) throw new Error(`Latest collection date is ${r.date}; Malaysia date is ${today}. Refusing to publish stale reports.`);
+          if (failed.length || !attempted || succeeded !== attempted) {
+            const names = failed.map(x => `${x.project}: ${x.error}`).join('; ');
+            throw new Error(`Collection incomplete (${succeeded}/${attempted} succeeded). Refusing to publish new reports. ${names}`);
+          }
+          console.log(`Collection verified: ${succeeded}/${attempted} projects succeeded on ${r.date}.`);
+          NODE
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install workbook dependencies
+        run: |
+          npm install --no-save exceljs
+          python -m pip install --upgrade pip
+          python -m pip install openpyxl
+
+      - name: Generate base competitor workbook from latest saved history
+        run: node scripts/export_competitor_workbook.mjs
+
+      - name: Generate monthly daily and weekly tracking workbooks
+        run: python scripts/export_daily_weekly_reports.py
+
+      - name: Verify main did not advance during generation
+        run: |
+          git fetch origin main
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+            echo "ERROR: main advanced while workbooks were being generated. No workbook commit was made; rerun this workflow against the latest history."
+            exit 1
+          fi
+
+      - name: Save workbooks as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Broga-Competitor-Tracking-Reports
+          path: |
+            Broga_Competitor_Sales_Analysis.xlsx
+            Broga_Daily_Tracking.xlsx
+            Broga_Weekly_Tracking.xlsx
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish latest Excel workbooks to repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Broga_Competitor_Sales_Analysis.xlsx Broga_Daily_Tracking.xlsx Broga_Weekly_Tracking.xlsx
+          if git diff --cached --quiet; then
+            echo "Workbooks are unchanged."
+          else
+            git commit -m "Update daily and weekly competitor tracking workbooks"
+            git push origin HEAD:main
+          fi
+
+  refresh-status-summary:
+    if: always() && needs.export-and-publish.result != 'success'
+    needs: [export-and-publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain refresh status without email configuration
+        env:
+          EXPORT_RESULT: ${{ needs.export-and-publish.result }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          echo "::warning::Excel refresh did not complete successfully (result: ${EXPORT_RESULT}). No email notification is configured."
+          {
+            echo '## Excel refresh needs attention'
+            echo "- Refresh job result: ${EXPORT_RESULT}"
+            echo '- No email secrets are required or used.'
+            echo '- Open the failed step above for the exact reason. If the error says collection-run metadata is missing, run **Daily TEDUH collection** first and confirm it succeeds before rerunning this refresh.'
+            echo '- Do not rely on the OneDrive workbook as fresh until the collection and refresh succeed.'
+          } >> "$GITHUB_STEP_SUMMARY"
