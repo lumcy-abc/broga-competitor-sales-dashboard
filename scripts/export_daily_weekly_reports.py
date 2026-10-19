@@ -239,14 +239,21 @@ def create_weekly(records, groups, lookup, by_group):
         raise ValueError("No valid signed observations on or after 1 October 2026; weekly report has not been created.")
     for y, m in months:
         ws = wb.create_sheet(month_name(y, m))
-        title(ws, len(groups)+1, f"BROGA COMPETITOR SALES ANALYSIS | WEEKLY TRACKER | {month_name(y,m).upper()}",
-              "Each week uses the latest valid signed observation in its Monday–Sunday period. Weekly Change appears inside every week block and compares against the previous week's snapshot. No Not Yet Signed row is included.")
-        ws.merge_cells(start_row=3,start_column=1,end_row=3,end_column=len(groups)+1)
-        ws.cell(3,1,"Project names are merged across their unit-group columns. A changed total denominator is flagged for review; missing records are not treated as zero.")
-        ws.cell(3,1).font=Font(italic=True,size=9,color=DARK); ws.cell(3,1).alignment=Alignment(wrap_text=True,vertical="center")
-        ws.row_dimensions[3].height=29
-        write_group_headers(ws, groups, 5)
-        rr=7
+        # Weekly tracker uses a compact one-row title, matching the daily tracker's
+        # clear visual hierarchy while removing the two redundant explanatory rows.
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(groups)+1)
+        c = ws.cell(1, 1, f"BROGA COMPETITOR SALES ANALYSIS | WEEKLY TRACKER | {month_name(y,m).upper()}")
+        c.fill = PatternFill("solid", fgColor=GREEN)
+        c.font = Font(name="Aptos Display", size=15, bold=True, color=WHITE)
+        c.alignment = Alignment(vertical="center")
+        ws.row_dimensions[1].height = 32
+        ws.sheet_view.showGridLines = False
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.page_setup.orientation = "landscape"
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
+        write_group_headers(ws, groups, 2)
+        rr=4
         periods=month_week_periods(y,m)
         for wi,(start,end) in enumerate(periods):
             period_end=min(end,TODAY)
@@ -277,8 +284,8 @@ def create_weekly(records, groups, lookup, by_group):
         c=ws.cell(rr+1,1,"Monthly tabs are generated from available history. Weeks are Monday–Sunday; weeks spanning month boundaries are shown in each month they overlap.")
         c.fill=PatternFill("solid",fgColor=CREAM); c.font=Font(italic=True,color="8B5E34",size=9); c.alignment=Alignment(wrap_text=True,vertical="center")
         ws.row_dimensions[rr+1].height=30
-        ws.freeze_panes="B7"; ws.print_title_rows="1:6"
-        outline_project_blocks(ws, groups, 7, rr + 1, header_row=5)
+        ws.freeze_panes="B4"; ws.print_title_rows="1:3"
+        outline_project_blocks(ws, groups, 4, rr + 1, header_row=2)
     wb.active=len(wb.sheetnames)-1
     wb.save(WEEKLY_OUT)
 
