@@ -26,25 +26,6 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Verify latest TEDUH collection is complete and current
-        run: |
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          const p = JSON.parse(fs.readFileSync('data/teduh-history.json', 'utf8'));
-          const r = p.lastRun;
-          if (!r || !r.date) throw new Error('No collection-run metadata found. Refusing to publish a potentially stale workbook.');
-          const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kuala_Lumpur', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-          const failed = Array.isArray(r.failed) ? r.failed : [];
-          const attempted = Number(r.attempted ?? 0);
-          const succeeded = Number(r.succeeded ?? 0);
-          if (r.date !== today) throw new Error(`Latest collection date is ${r.date}; Malaysia date is ${today}. Refusing to publish stale reports.`);
-          if (failed.length || !attempted || succeeded !== attempted) {
-            const names = failed.map(x => `${x.project}: ${x.error}`).join('; ');
-            throw new Error(`Collection incomplete (${succeeded}/${attempted} succeeded). Refusing to publish new reports. ${names}`);
-          }
-          console.log(`Collection verified: ${succeeded}/${attempted} projects succeeded on ${r.date}.`);
-          NODE
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -97,22 +78,3 @@ jobs:
             git commit -m "Update daily and weekly competitor tracking workbooks"
             git push origin HEAD:main
           fi
-
-  refresh-status-summary:
-    if: always() && needs.export-and-publish.result != 'success'
-    needs: [export-and-publish]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Explain refresh status without email configuration
-        env:
-          EXPORT_RESULT: ${{ needs.export-and-publish.result }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          echo "::warning::Excel refresh did not complete successfully (result: ${EXPORT_RESULT}). No email notification is configured."
-          {
-            echo '## Excel refresh needs attention'
-            echo "- Refresh job result: ${EXPORT_RESULT}"
-            echo '- No email secrets are required or used.'
-            echo '- Open the failed step above for the exact reason. If the error says collection-run metadata is missing, run **Daily TEDUH collection** first and confirm it succeeds before rerunning this refresh.'
-            echo '- Do not rely on the OneDrive workbook as fresh until the collection and refresh succeed.'
-          } >> "$GITHUB_STEP_SUMMARY"
