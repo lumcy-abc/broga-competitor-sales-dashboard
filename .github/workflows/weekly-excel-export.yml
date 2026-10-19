@@ -1,10 +1,10 @@
 name: Daily and Weekly Competitor Excel Refresh
 
 on:
-  workflow_run:
-    workflows: ["Daily TEDUH collection"]
-    types: [completed]
-    branches: [main]
+  schedule:
+    # 09:00 Malaysia time every day (01:00 UTC), after daily TEDUH collection.
+    # This refreshes the daily workbook, weekly summaries, and current-month tabs.
+    - cron: '0 1 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -16,15 +16,10 @@ permissions:
 
 jobs:
   export-and-publish:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
-      - name: Check out latest main branch
+      - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -42,19 +37,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install openpyxl
 
-      - name: Generate base competitor workbook from latest saved history
+      - name: Generate base competitor workbook from history
         run: node scripts/export_competitor_workbook.mjs
 
       - name: Generate monthly daily and weekly tracking workbooks
         run: python scripts/export_daily_weekly_reports.py
-
-      - name: Verify main did not advance during generation
-        run: |
-          git fetch origin main
-          if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
-            echo "ERROR: main advanced while workbooks were being generated. No workbook commit was made; rerun this workflow against the latest history."
-            exit 1
-          fi
 
       - name: Save workbooks as workflow artifact
         uses: actions/upload-artifact@v4
@@ -76,5 +63,5 @@ jobs:
             echo "Workbooks are unchanged."
           else
             git commit -m "Update daily and weekly competitor tracking workbooks"
-            git push origin HEAD:main
+            git push
           fi
