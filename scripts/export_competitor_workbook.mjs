@@ -1,299 +1,317 @@
-#!/usr/bin/env python3
-"""Generate long-term monthly daily trackers and monthly weekly reports.
+import fs from 'node:fs';
+import path from 'node:path';
+import ExcelJS from 'exceljs';
 
-Run after scripts/export_competitor_workbook.mjs. Reads the generated workbook's
-Historical Records sheet; does not alter the TEDUH collector or its JSON history.
-"""
-from datetime import datetime, date, timedelta
-from pathlib import Path
-from collections import defaultdict
-from calendar import monthrange
-from openpyxl import load_workbook, Workbook
-from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
-from openpyxl.utils import get_column_letter
+const ROOT = process.cwd();
+const HTML_PATH = path.join(ROOT, 'index.html');
+const HISTORY_PATH = path.join(ROOT, 'data', 'teduh-history.json');
+const OUT_PATH = path.join(ROOT, 'Broga_Competitor_Sales_Analysis.xlsx');
 
-ROOT = Path.cwd()
-SOURCE = ROOT / "Broga_Competitor_Sales_Analysis.xlsx"
-DAILY_OUT = ROOT / "Broga_Daily_Tracking.xlsx"
-WEEKLY_OUT = ROOT / "Broga_Weekly_Tracking.xlsx"
-GREEN, BROWN, SAGE, CREAM = "526747", "8B6F4E", "E8EDE3", "F3EBDD"
-WHITE, DARK, GRAY, LINE, PALE, AMBER, LIGHT = "FFFFFF", "263126", "666666", "D7DCCF", "DCE8D5", "F6E5C9", "F7F8F4"
-TODAY = date.today()
+function loadEmbeddedData(html) {
+  const marker = 'const DATA=';
+  const startAt = html.indexOf(marker);
+  if (startAt < 0) throw new Error('Could not find the embedded DATA object in index.html.');
+  const start = startAt + marker.length;
+  const end = html.indexOf(';\nconst $', start);
+  if (end < 0) throw new Error('Could not locate the end of the embedded DATA object.');
+  return JSON.parse(html.slice(start, end));
+}
+function isSigned(c) {
+  const label = String(c?.label ?? '').toLowerCase();
+  const raw = String(c?.raw ?? '').toLowerCase();
+  return label.includes('signed') || raw.includes('signed');
+}
+function isBooked(c) {
+  const label = String(c?.label ?? '').toLowerCase();
+  const raw = String(c?.raw ?? '').toLowerCase();
+  return label.includes('booked') || raw.includes('booked');
+}
+function componentsFor(r) {
+  if (Array.isArray(r.components)) return r.components;
+  if (Number.isFinite(Number(r.signed)) && Number.isFinite(Number(r.total)) && Number(r.total) > 0) {
+    return [{ label: 'Signed', units: Number(r.signed), total: Number(r.total), raw: r.raw ?? '' }];
+  }
+  return [];
+}
+function groupLabel(data, project, component, index, components) {
+  // Springvale's 189-unit observations belong to the earlier release scope, before the additional houses were released.
+  if (project === 'Springvale Sempurna Heights' && Number(component.total) === 189) return 'Earlier release scope (189 units)';
 
+  const ruleGroups = data.scopeRules?.[project]?.groups ?? [];
+  const total = Number(component.total);
+  const stableId = component.unitGroupId ?? component.groupId ?? component.apiGroupId ?? component.teduhGroupId ?? component.group_id ?? component.unitTypeId ?? component.id;
+  if (stableId !== undefined && stableId !== null && String(stableId).trim()) {
+    const byId = ruleGroups.filter(g => [g.apiGroupId, g.unitGroupId, g.groupId, g.teduhGroupId, g.id]
+      .some(id => id !== undefined && id !== null && String(id) === String(stableId)));
+    if (byId.length === 1) return byId[0].label;
+  }
 
-def read_records():
-    if not SOURCE.exists():
-        raise FileNotFoundError(f"Missing {SOURCE.name}. Run the existing Excel export first.")
-    book = load_workbook(SOURCE, read_only=True, data_only=True)
-    if "Historical Records" not in book.sheetnames:
-        raise ValueError("Source workbook has no Historical Records sheet.")
-    sheet = book["Historical Records"]
-    headers = [c.value for c in next(sheet.iter_rows(min_row=1, max_row=1))]
-    out = {}
-    for values in sheet.iter_rows(min_row=2, values_only=True):
-        rec = dict(zip(headers, values))
-        raw_date = rec.get("Record Date")
-        try:
-            dt = raw_date.date() if isinstance(raw_date, datetime) else datetime.strptime(str(raw_date), "%d/%m/%Y").date()
-            signed, total = float(rec.get("Signed Units")), float(rec.get("Total Units"))
-        except (ValueError, TypeError, AttributeError):
-            continue
-        if str(rec.get("Status Type", "")).lower() != "signed" or total <= 0:
-            continue
-        project = str(rec.get("Project") or "").strip()
-        group = str(rec.get("Unit Group / Layout") or "").strip()
-        if not project or not group:
-            continue
-        key = (dt, project, group)
-        out[key] = {"date": dt, "project": project, "group": group, "signed": signed, "total": total}
-    return sorted(out.values(), key=lambda r: (r["date"], r["project"], r["group"]))
+  const explicit = component.groupLabel || component.unitGroup || component.group || component.layoutLabel;
+  if (explicit && !/^(signed|booked|yet to sign|yet to launch|all configured comparison units)$/i.test(String(explicit).trim())) {
+    return String(explicit).trim();
+  }
 
+  // A unique denominator can safely map to a configured group. Never use array order
+  // to decide between multiple groups with the same denominator.
+  const sameTotal = ruleGroups.filter(g => Number(g.total) === total);
+  if (sameTotal.length === 1) return sameTotal[0].label;
 
-def style_cell(cell, fill=WHITE, bold=False, color=DARK, horizontal="center", size=9):
-    cell.fill = PatternFill("solid", fgColor=fill)
-    cell.font = Font(name="Aptos", size=size, bold=bold, color=color)
-    cell.alignment = Alignment(horizontal=horizontal, vertical="center", wrap_text=True)
-    thin = Side(style="thin", color=LINE)
-    cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+  const landLines = String(data.static?.[project]?.['land area'] ?? '').split(/\n+/).map(x => x.trim()).filter(Boolean);
+  if (ruleGroups.length === 0 && components.length === 1) {
+    return data.scopeRules?.[project]?.label || landLines[0] || 'All comparison units';
+  }
+  if (components.length === 1) return data.scopeRules?.[project]?.label || 'All comparison units';
 
+  const idSuffix = stableId !== undefined && stableId !== null && String(stableId).trim()
+    ? ` [TEDUH ID: ${String(stableId).trim()}]`
+    : '';
+  console.warn(`UNMAPPED UNIT GROUP: ${project}; component ${index + 1} has no unique stable mapping${idSuffix}. Add a verified TEDUH ID/scopeRules mapping before interpreting group-level trends.`);
+  return `Unmapped unit group ${index + 1} — verify TEDUH mapping${idSuffix}`;
+}
+function normalizeRecord(data, r, source) {
+  const project = String(r.project || r.development || r.name || '').trim();
+  let date = String(r.date || r.recordDate || '').slice(0, 10);
+  if (!project || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  // User-verified correction: these two M Legasi snapshots belong to 27 Feb 2026,
+  // as confirmed by the latest original dated source workbook.
+  if ((project === 'M Legasi Phase 1' || project === 'M Legasi Phase 2') && date === '2025-02-27') date = '2026-02-27';
+  const components = componentsFor(r).map((c, index, arr) => ({
+    ...c,
+    _groupLabel: groupLabel(data, project, c, index, arr),
+  }));
+  return { ...r, project, date, raw: r.raw ?? '', components, source };
+}
+function mergeRecords(data, sharedRecords) {
+  const byKey = new Map();
+  for (const r of data.history ?? []) {
+    const normalized = normalizeRecord(data, r, 'Embedded historical record');
+    if (normalized) byKey.set(`${normalized.project}|${normalized.date}`, normalized);
+  }
+  for (const r of sharedRecords ?? []) {
+    const normalized = normalizeRecord(data, r, 'Saved TEDUH record');
+    if (!normalized) continue;
+    const key = `${normalized.project}|${normalized.date}`;
+    const existing = byKey.get(key);
+    if (!existing || normalized.components.length) byKey.set(key, normalized);
+  }
+  return [...byKey.values()].sort((a, b) => a.project.localeCompare(b.project) || a.date.localeCompare(b.date));
+}
+function signedMap(record) {
+  const result = new Map();
+  if (!record) return result;
+  for (const c of record.components ?? []) {
+    if (!isSigned(c)) continue;
+    result.set(c._groupLabel, c);
+  }
+  return result;
+}
+function percent(c) {
+  // Recalculate from the recorded counts; source-reported percentages have known historical errors.
+  if (!c) return null;
+  const total = Number(c.total);
+  const units = Number(c.units);
+  return Number.isFinite(units) && Number.isFinite(total) && total > 0 ? units / total * 100 : null;
+}
+function formatDate(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+function weeklyBaseline(signedRecords, latest) {
+  if (!latest) return null;
+  const latestTime = Date.parse(`${latest.date}T00:00:00Z`);
+  const min = latestTime - 14 * 86400000;
+  const max = latestTime - 7 * 86400000;
+  return [...signedRecords].reverse().find(r => {
+    const t = Date.parse(`${r.date}T00:00:00Z`);
+    return t >= min && t <= max;
+  }) ?? null;
+}
 
-def title(ws, last_col, heading, subtitle):
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
-    c = ws.cell(1, 1, heading); c.fill = PatternFill("solid", fgColor=GREEN)
-    c.font = Font(name="Aptos Display", size=15, bold=True, color=WHITE)
-    c.alignment = Alignment(vertical="center")
-    ws.row_dimensions[1].height = 32
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_col)
-    c = ws.cell(2, 1, subtitle); c.fill = PatternFill("solid", fgColor=CREAM)
-    c.font = Font(italic=True, color="8B5E34", size=10)
-    c.alignment = Alignment(vertical="center", wrap_text=True)
-    ws.row_dimensions[2].height = 27
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.pageSetUpPr.fitToPage = True
-    ws.page_setup.orientation = "landscape"
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
+const html = fs.readFileSync(HTML_PATH, 'utf8');
+const data = loadEmbeddedData(html);
+const shared = JSON.parse(fs.readFileSync(HISTORY_PATH, 'utf8'));
+if (!Array.isArray(shared.records)) throw new Error('data/teduh-history.json does not contain a records array.');
+const history = mergeRecords(data, shared.records);
+if (!history.length) throw new Error('No valid dated records were found.');
 
+const byProject = new Map();
+for (const r of history) {
+  if (!byProject.has(r.project)) byProject.set(r.project, []);
+  byProject.get(r.project).push(r);
+}
+const projects = [];
+for (const [project, records] of byProject) {
+  records.sort((a, b) => a.date.localeCompare(b.date));
+  const signedRecords = records.filter(r => signedMap(r).size > 0);
+  const latest = signedRecords.at(-1) ?? records.at(-1);
+  const previous = signedRecords.length ? weeklyBaseline(signedRecords, latest) : null;
+  const latestMap = signedMap(latest);
+  const previousMap = signedMap(previous);
+  let labels = [...new Set([...latestMap.keys(), ...previousMap.keys()])];
+  const configuredOrder = (data.scopeRules?.[project]?.groups ?? []).map(g => g.label);
+  if (configuredOrder.some(label => labels.includes(label))) {
+    labels.sort((a, b) => {
+      const ai = configuredOrder.indexOf(a), bi = configuredOrder.indexOf(b);
+      if (ai >= 0 && bi >= 0) return ai - bi;
+      if (ai >= 0) return -1;
+      if (bi >= 0) return 1;
+      return 0;
+    });
+  }
+  if (!labels.length) labels = ['Overall status'];
+  projects.push({ project, records, latest, previous, latestMap, previousMap, labels });
+}
+projects.sort((a, b) => a.project.localeCompare(b.project));
 
-def status(r):
-    return f"{round(r['signed'] / r['total'] * 100)}% Signed ({int(r['signed'])}/{int(r['total'])} units)"
+const wb = new ExcelJS.Workbook();
+wb.creator = 'Broga Competitor Sales Dashboard';
+wb.created = new Date();
+wb.modified = new Date();
+const ws = wb.addWorksheet('Weekly Comparison', { views: [{ state: 'frozen', xSplit: 1, ySplit: 5, topLeftCell: 'B6' }] });
+ws.views = [{ state: 'frozen', xSplit: 1, ySplit: 5, topLeftCell: 'B6', zoomScale: 80 }];
+ws.getColumn(1).width = 25;
 
+const totalCols = 1 + projects.reduce((n, p) => n + p.labels.length, 0);
+ws.mergeCells(1, 1, 1, totalCols);
+ws.getCell(1, 1).value = 'BROGA COMPETITOR SALES ANALYSIS';
+ws.getCell(1, 1).font = { name: 'Aptos Display', size: 18, bold: true, color: { argb: 'FFFFFFFF' } };
+ws.getCell(1, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF172554' } };
+ws.getCell(1, 1).alignment = { vertical: 'middle' };
+ws.getRow(1).height = 34;
+ws.mergeCells(2, 1, 2, totalCols);
+ws.getCell(2, 1).value = `Generated from embedded historical records + saved TEDUH records · ${formatDate(new Date().toISOString().slice(0,10))}`;
+ws.getCell(2, 1).font = { size: 10, bold: true, color: { argb: 'FF475467' } };
+ws.getCell(2, 1).alignment = { vertical: 'middle', wrapText: true };
+ws.getRow(2).height = 24;
+ws.getCell(4, 1).value = 'RECORD DETAIL';
+ws.getCell(5, 1).value = 'Unit group / layout';
 
-def delta(cur, prev):
-    if not cur: return "No record"
-    if not prev: return "No prior record"
-    if cur["total"] != prev["total"]: return "Total changed — review"
-    n = int(cur["signed"] - prev["signed"])
-    return "No change" if n == 0 else f"{n:+d} signed"
+let col = 2;
+for (const p of projects) {
+  p.startCol = col;
+  p.endCol = col + p.labels.length - 1;
+  if (p.endCol > p.startCol) ws.mergeCells(4, p.startCol, 4, p.endCol);
+  ws.getCell(4, p.startCol).value = p.project;
+  p.labels.forEach((label, i) => {
+    ws.getCell(5, col + i).value = label;
+    ws.getColumn(col + i).width = 21;
+  });
+  col = p.endCol + 1;
+}
+const navy = 'FF172554', lightBlue = 'FFEAF2FF', lightGrey = 'FFF3F5F8', border = 'FFD7DDE7';
+for (let c = 1; c <= totalCols; c++) {
+  for (const r of [4, 5]) {
+    const cell = ws.getCell(r, c);
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: r === 4 ? navy : lightBlue } };
+    cell.font = { bold: true, color: { argb: r === 4 ? 'FFFFFFFF' : navy } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    cell.border = { bottom: { style: 'thin', color: border } };
+  }
+}
+ws.getRow(4).height = 34; ws.getRow(5).height = 48;
+const rowSpecs = [
+  ['Latest record', 'dateLatest'],
+  ['Sales Unit · latest', 'unitsLatest'],
+  ['Sales Status · latest', 'pctLatest'],
+  ['Weekly baseline', 'datePrevious'],
+  ['Sales Unit · baseline', 'unitsPrevious'],
+  ['Sales Status · baseline', 'pctPrevious'],
+  ['Weekly Change', 'change'],
+];
+for (let i = 0; i < rowSpecs.length; i++) {
+  const rowNo = 6 + i;
+  const [label, kind] = rowSpecs[i];
+  ws.getCell(rowNo, 1).value = label;
+  ws.getCell(rowNo, 1).font = { bold: true, color: { argb: 'FF5D6878' } };
+  ws.getCell(rowNo, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: lightGrey } };
+  ws.getCell(rowNo, 1).alignment = { vertical: 'middle', wrapText: true };
+  for (const p of projects) {
+    p.labels.forEach((g, idx) => {
+      const cell = ws.getCell(rowNo, p.startCol + idx);
+      const cur = p.latestMap.get(g); const prev = p.previousMap.get(g);
+      const latestRaw = String(p.latest.raw ?? '').toLowerCase();
+      const prevRaw = String(p.previous?.raw ?? '').toLowerCase();
+      if (kind === 'dateLatest') cell.value = formatDate(p.latest.date);
+      else if (kind === 'datePrevious') cell.value = p.previous ? formatDate(p.previous.date) : 'No record 7–14 days earlier';
+      else if (kind === 'unitsLatest') cell.value = cur ? `${cur.units} / ${cur.total}` : '—';
+      else if (kind === 'pctLatest') cell.value = cur ? `${Math.round(percent(cur))}%` : (latestRaw.includes('yet to launch') ? 'Yet to launch' : latestRaw.includes('yet to sign') ? 'Yet to sign' : '—');
+      else if (kind === 'unitsPrevious') cell.value = prev ? `${prev.units} / ${prev.total}` : '—';
+      else if (kind === 'pctPrevious') cell.value = prev ? `${Math.round(percent(prev))}%` : (prevRaw.includes('yet to launch') ? 'Yet to launch' : prevRaw.includes('yet to sign') ? 'Yet to sign' : '—');
+      else if (kind === 'change') {
+        let value;
+        if (!cur || !prev) value = (!cur && /yet to (sign|launch)/i.test(p.latest.raw ?? '')) ? 'No signed status yet' : 'Insufficient weekly history';
+        else if (Number(cur.total) !== Number(prev.total)) value = 'Total changed — review';
+        else {
+          const delta = Number(cur.units) - Number(prev.units);
+          value = delta === 0 ? 'No change' : `${delta > 0 ? '+' : ''}${delta} signed`;
+        }
+        cell.value = value;
+        if (value === 'No change') { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F2F5' } }; cell.font = { bold: true, color: { argb: 'FF5D6878' } }; }
+        else if (/review|insufficient/i.test(value)) { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF1D6' } }; cell.font = { bold: true, color: { argb: 'FFB54708' } }; }
+        else if (/signed/i.test(value)) { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F7EF' } }; cell.font = { bold: true, color: { argb: 'FF067647' } }; }
+      }
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      cell.border = { bottom: { style: 'thin', color: border } };
+      if (rowNo >= 6 && rowNo <= 8) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FBFF' } };
+    });
+  }
+  ws.getRow(rowNo).height = kind === 'change' || kind.startsWith('date') ? 38 : 32;
+}
+ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: totalCols } };
+ws.pageSetup = { orientation: 'landscape', paperSize: 8, fitToPage: true, fitToWidth: 2, fitToHeight: 0, horizontalDpi: 300, verticalDpi: 300 };
+ws.pageMargins = { left: 0.25, right: 0.25, top: 0.45, bottom: 0.45, header: 0.2, footer: 0.2 };
+ws.printTitlesRow = '1:5';
 
+const hs = wb.addWorksheet('Historical Records', { views: [{ state: 'frozen', ySplit: 1, topLeftCell: 'A2' }] });
+hs.views = [{ state: 'frozen', ySplit: 1, topLeftCell: 'A2', zoomScale: 90 }];
+const histHeaders = ['Record Date','Project','Unit Group / Layout','Status Type','Signed Units','Total Units','Signed %','Raw Recorded Status','Source'];
+hs.addRow(histHeaders);
+hs.getRow(1).height = 30;
+hs.getRow(1).eachCell((cell) => {
+  cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: navy } };
+  cell.alignment = { vertical: 'middle', wrapText: true };
+});
+for (const r of history) {
+  const comps = r.components ?? [];
+  if (!comps.length) {
+    hs.addRow([formatDate(r.date),r.project,'No group details','Unclassified','','','','No parseable group-level values: '+String(r.raw ?? ''),r.source]);
+    continue;
+  }
+  comps.forEach((c, idx) => {
+    const type = isSigned(c) ? 'Signed' : isBooked(c) ? 'Booked' : String(c.label ?? 'Unclassified');
+    const total = Number(c.total) || '';
+    const signedUnits = type === 'Signed' ? Number(c.units) : '';
+    const pctValue = type === 'Signed' && total ? Number(c.units) / Number(total) : null;
+    const row = hs.addRow([formatDate(r.date),r.project,c._groupLabel ?? groupLabel(data,r.project,c,idx,comps),type,signedUnits,total,pctValue,c.raw ?? r.raw ?? '',r.source]);
+    row.getCell(7).numFmt = '0%';
+  });
+}
+[15,32,32,17,14,14,12,46,24].forEach((width, i) => hs.getColumn(i + 1).width = width);
+hs.autoFilter = { from: { row: 1, column: 1 }, to: { row: hs.rowCount, column: histHeaders.length } };
+for (let r = 2; r <= hs.rowCount; r++) {
+  hs.getRow(r).eachCell(cell => { cell.border = { bottom: { style: 'hair', color: 'FFE5E7EB' } }; cell.alignment = { vertical: 'top', wrapText: [3,8].includes(cell.col) }; });
+}
 
-def month_range(start, end):
-    y, m = start.year, start.month
-    while (y, m) <= (end.year, end.month):
-        yield y, m
-        if m == 12: y, m = y + 1, 1
-        else: m += 1
+const readme = wb.addWorksheet('Read Me');
+readme.addRows([
+  ['Purpose','Horizontal competitor comparison by development and unit group; historical observations are preserved in Historical Records.'],
+  ['Weekly baseline','The comparison uses a signed record dated 7–14 days before the latest signed record. If no such record exists, the workbook shows Insufficient weekly history rather than comparing against a much older date.'],
+  ['Sales Unit','Signed units / total units, shown separately for every unit group. Groups are not combined into one total.'],
+  ['Sales Status','Signed units divided by that group’s confirmed total, rounded to a whole percentage for display. Booking-only observations are not treated as zero signed sales.'],
+  ['Weekly Change','The signed-unit change versus the weekly baseline. If the denominator changed, the workbook flags review instead of presenting a misleading sales change.'],
+  ['Scope','Birchpark remains four terrace groups and excludes rumah bandar. Sapphire uses the terrace-only comparison scope. Springvale keeps the 27-unit front-kitchen and 308-unit rear-kitchen groups separate.'],
+  ['OneDrive destination','Use a separate file named Broga_Competitor_Sales_Analysis.xlsx. Do not overwrite the original source workbook.'],
+]);
+readme.getColumn(1).width = 26; readme.getColumn(2).width = 115;
+for (let r = 1; r <= readme.rowCount; r++) {
+  readme.getCell(r,1).font = { bold: true, color: { argb: navy } };
+  readme.getCell(r,1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: lightBlue } };
+  readme.getCell(r,1).alignment = { vertical: 'top', wrapText: true };
+  readme.getCell(r,2).alignment = { vertical: 'top', wrapText: true };
+  readme.getRow(r).height = 46;
+}
 
-
-def month_name(y, m):
-    return date(y, m, 1).strftime("%b %Y")
-
-
-def group_records(records):
-    groups = sorted({(r["project"], r["group"]) for r in records}, key=lambda x: (x[0].casefold(), x[1].casefold()))
-    lookup = {(r["date"], (r["project"], r["group"])): r for r in records}
-    by_group = defaultdict(list)
-    for r in records: by_group[(r["project"], r["group"])].append(r)
-    for g in by_group: by_group[g].sort(key=lambda r: r["date"])
-    return groups, lookup, by_group
-
-
-def write_group_headers(ws, groups, first_header_row=4):
-    # Column A is explicitly labelled PROJECT NAMES per the requested design.
-    ws.cell(first_header_row, 1, "PROJECT NAMES")
-    ws.cell(first_header_row + 1, 1, "Unit group / layout")
-    col = 2
-    while col <= len(groups) + 1:
-        project = groups[col - 2][0]
-        end = col + 1
-        while end <= len(groups) + 1 and groups[end - 2][0] == project:
-            end += 1
-        if end - 1 > col:
-            ws.merge_cells(start_row=first_header_row, start_column=col, end_row=first_header_row, end_column=end - 1)
-        ws.cell(first_header_row, col, project)
-        for c in range(col, end):
-            ws.cell(first_header_row + 1, c, groups[c - 2][1])
-            ws.column_dimensions[get_column_letter(c)].width = 23
-        col = end
-    for c in range(1, len(groups) + 2):
-        style_cell(ws.cell(first_header_row, c), GREEN, True, WHITE, size=9)
-        style_cell(ws.cell(first_header_row + 1, c), BROWN, True, WHITE, size=9)
-    ws.column_dimensions["A"].width = 24
-    ws.row_dimensions[first_header_row].height = 35
-    ws.row_dimensions[first_header_row + 1].height = 32
-
-
-def build_previous_lookup(by_group, groups, month_start, month_end):
-    # For each calendar date, cache the latest observation before that date.
-    result = {}
-    for g in groups:
-        rows = by_group.get(g, [])
-        idx = 0
-        previous = None
-        dt = month_start
-        while dt <= month_end:
-            while idx < len(rows) and rows[idx]["date"] < dt:
-                previous = rows[idx]
-                idx += 1
-            result[(dt, g)] = previous
-            dt += timedelta(days=1)
-    return result
-
-
-
-def outline_project_blocks(ws, groups, first_data_row, last_data_row, header_row=5):
-    """Add a clear vertical boundary around each project's layout columns."""
-    medium = Side(style="medium", color=GREEN)
-    for idx, group in enumerate(groups, start=2):
-        starts_project = idx == 2 or groups[idx - 3][0] != group[0]
-        ends_project = idx == len(groups) + 1 or groups[idx - 1][0] != group[0]
-        if starts_project or ends_project:
-            col = idx
-            for row in range(header_row, last_data_row + 1):
-                cell = ws.cell(row, col)
-                b = cell.border
-                cell.border = Border(left=medium if starts_project else b.left,
-                                     right=medium if ends_project else b.right,
-                                     top=b.top, bottom=b.bottom)
-
-
-def create_daily(records, groups, lookup, by_group):
-    wb = Workbook()
-    wb.remove(wb.active)
-    # Daily tabs are created only for months with valid observations, plus the current month.
-    # This preserves useful history without producing empty tabs for months with no records.
-    data_months = {(r["date"].year, r["date"].month) for r in records}
-    data_months.add((TODAY.year, TODAY.month))
-    months = sorted(data_months)
-    for y, m in months:
-        ws = wb.create_sheet(month_name(y, m))
-        last_day = TODAY.day if (y, m) == (TODAY.year, TODAY.month) else monthrange(y, m)[1] if date(y, m, 1) < TODAY.replace(day=1) else 0
-        month_start = date(y, m, 1)
-        month_end = date(y, m, last_day) if last_day else date(y, m, monthrange(y, m)[1])
-        title(ws, len(groups) + 1, f"BROGA COMPETITOR SALES ANALYSIS | DAILY TRACKER | {month_name(y,m).upper()}",
-              "Daily validation view · Sales status is combined with unit count and percentage. Daily Change compares with the previous available signed observation; it does not sum snapshots.")
-        ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=len(groups)+1)
-        ws.cell(3, 1, "A new monthly tab is generated automatically when this report runs in a new month. Historical month tabs are retained in the regenerated workbook.")
-        ws.cell(3, 1).font = Font(italic=True, size=9, color=DARK); ws.cell(3,1).alignment = Alignment(wrap_text=True, vertical="center")
-        ws.row_dimensions[3].height = 29
-        write_group_headers(ws, groups, 5)
-        previous_lookup = build_previous_lookup(by_group, groups, month_start, month_end)
-        rr = 7
-        for day_num in range(1, month_end.day + 1):
-            dt = date(y, m, day_num)
-            ws.cell(rr, 1, dt.strftime("%d %b %Y") + " · Sales Status")
-            ws.cell(rr + 1, 1, "Daily Change")
-            style_cell(ws.cell(rr, 1), BROWN, True, WHITE, "left")
-            style_cell(ws.cell(rr + 1, 1), CREAM, True, DARK, "left")
-            for j, g in enumerate(groups, 2):
-                cur = lookup.get((dt, g))
-                prev = previous_lookup.get((dt, g))
-                val = status(cur) if cur else ("No signed observation" if dt <= TODAY else "Not yet reached")
-                change = delta(cur, prev)
-                style_cell(ws.cell(rr, j, val), SAGE if cur else LIGHT)
-                fill = PALE if change not in ("No change", "No prior record", "No record") and "review" not in change else AMBER if "review" in change else LIGHT
-                style_cell(ws.cell(rr + 1, j, change if cur else ("No observation" if dt <= TODAY else "Not yet reached")), fill, True)
-            ws.row_dimensions[rr].height = 32; ws.row_dimensions[rr+1].height = 27
-            rr += 2
-        ws.freeze_panes = "B7"
-        ws.print_title_rows = "1:6"
-        ws.auto_filter.ref = f"A6:{get_column_letter(len(groups)+1)}{rr-1}"
-        outline_project_blocks(ws, groups, 7, rr - 1, header_row=5)
-    wb.active = len(wb.sheetnames) - 1
-    wb.save(DAILY_OUT)
-
-
-def month_week_periods(y, m):
-    first = date(y, m, 1)
-    last = date(y, m, monthrange(y, m)[1])
-    # Start with the first complete Monday–Sunday reporting week that begins
-    # inside this calendar month (e.g. October 2026 starts on Monday 5 Oct).
-    monday = first + timedelta(days=(7 - first.weekday()) % 7)
-    periods = []
-    start = monday
-    while start <= last:
-        end = start + timedelta(days=6)
-        periods.append((start, end))
-        start += timedelta(days=7)
-    return periods
-
-
-def create_weekly(records, groups, lookup, by_group):
-    wb = Workbook(); wb.remove(wb.active)
-    # Weekly comparisons begin in October 2026. Create a monthly tab only when
-    # that month has valid records; future tabs appear automatically after data arrives.
-    weekly_start = date(2026, 10, 1)
-    months = sorted({(r["date"].year, r["date"].month) for r in records
-                     if r["date"] >= weekly_start})
-    if not months:
-        raise ValueError("No valid signed observations on or after 1 October 2026; weekly report has not been created.")
-    for y, m in months:
-        ws = wb.create_sheet(month_name(y, m))
-        title(ws, len(groups)+1, f"BROGA COMPETITOR SALES ANALYSIS | WEEKLY TRACKER | {month_name(y,m).upper()}",
-              "Each week uses the latest valid signed observation in its Monday–Sunday period. Weekly Change appears inside every week block and compares against the previous week's snapshot. No Not Yet Signed row is included.")
-        ws.merge_cells(start_row=3,start_column=1,end_row=3,end_column=len(groups)+1)
-        ws.cell(3,1,"Project names are merged across their unit-group columns. A changed total denominator is flagged for review; missing records are not treated as zero.")
-        ws.cell(3,1).font=Font(italic=True,size=9,color=DARK); ws.cell(3,1).alignment=Alignment(wrap_text=True,vertical="center")
-        ws.row_dimensions[3].height=29
-        write_group_headers(ws, groups, 5)
-        rr=7
-        periods=month_week_periods(y,m)
-        for wi,(start,end) in enumerate(periods):
-            period_end=min(end,TODAY)
-            ws.merge_cells(start_row=rr,start_column=1,end_row=rr,end_column=len(groups)+1)
-            c=ws.cell(rr,1,f"WEEK · {start.strftime('%-d %b %Y')} – {end.strftime('%-d %b %Y')}")
-            c.fill=PatternFill("solid",fgColor=BROWN); c.font=Font(bold=True,color=WHITE,size=10); c.alignment=Alignment(vertical="center")
-            ws.row_dimensions[rr].height=24; rr+=1
-            for metric,kind in [("Sales Status","status"),("Weekly Change","change")]:
-                style_cell(ws.cell(rr,1,metric), SAGE if kind=="status" else CREAM, True, DARK, "left")
-                for j,g in enumerate(groups,2):
-                    valid=[r for r in by_group.get(g,[]) if start<=r["date"]<=period_end] if start<=TODAY else []
-                    cur=max(valid,key=lambda x:x["date"]) if valid else None
-                    prev_start=start-timedelta(days=7); prev_end=start-timedelta(days=1)
-                    prior=[r for r in by_group.get(g,[]) if prev_start<=r["date"]<=prev_end]
-                    prev=max(prior,key=lambda x:x["date"]) if prior else None
-                    if kind=="status":
-                        val=status(cur) if cur else ("In progress" if start<=TODAY<=end else "Future week" if start>TODAY else "No record this week")
-                        fill=SAGE if cur else CREAM
-                    else:
-                        if start>TODAY: val="Future week"
-                        elif not cur: val="In progress" if start<=TODAY<=end else "No record this week"
-                        elif not prev: val="Baseline / no prior-week record"
-                        else: val=delta(cur,prev)
-                        fill=PALE if (str(val).startswith("+") or val=="No change") else AMBER if "review" in str(val).lower() else CREAM
-                    style_cell(ws.cell(rr,j,val),fill,kind=="change")
-                ws.row_dimensions[rr].height=32 if kind=="status" else 28; rr+=1
-        ws.merge_cells(start_row=rr+1,start_column=1,end_row=rr+1,end_column=len(groups)+1)
-        c=ws.cell(rr+1,1,"Monthly tabs are generated from available history. Weeks are Monday–Sunday; weeks spanning month boundaries are shown in each month they overlap.")
-        c.fill=PatternFill("solid",fgColor=CREAM); c.font=Font(italic=True,color="8B5E34",size=9); c.alignment=Alignment(wrap_text=True,vertical="center")
-        ws.row_dimensions[rr+1].height=30
-        ws.freeze_panes="B7"; ws.print_title_rows="1:6"
-        outline_project_blocks(ws, groups, 7, rr + 1, header_row=5)
-    wb.active=len(wb.sheetnames)-1
-    wb.save(WEEKLY_OUT)
-
-
-def main():
-    records=read_records()
-    if not records: raise ValueError("No valid signed records found in Historical Records.")
-    groups, lookup, by_group = group_records(records)
-    create_daily(records, groups, lookup, by_group)
-    create_weekly(records, groups, lookup, by_group)
-    daily_tabs = load_workbook(DAILY_OUT, read_only=True).sheetnames
-    weekly_tabs = load_workbook(WEEKLY_OUT, read_only=True).sheetnames
-    print(f"Created {DAILY_OUT.name} with {len(daily_tabs)} tabs ({', '.join(daily_tabs)})")
-    print(f"Created {WEEKLY_OUT.name} with {len(weekly_tabs)} tabs ({', '.join(weekly_tabs)}), starting from October 2026")
-    print(f"Source: {len(records)} valid signed observations across {len(groups)} project/layout groups.")
-
-if __name__ == "__main__":
-    main()
+await wb.xlsx.writeFile(OUT_PATH);
+console.log(`Created ${OUT_PATH} from ${history.length} merged dated project records.`);
