@@ -89,50 +89,6 @@ def read_records():
     return sorted(out.values(), key=lambda r: (r["date"], r["project"], r["group"]))
 
 
-def read_history_rows():
-    """Read every dated row in Historical Records, including non-signed/unknown statuses.
-
-    Trend calculations still use only valid signed observations, but Snapshot History
-    must expose all available source dates/statuses for auditing and date filtering.
-    """
-    book = load_workbook(SOURCE, read_only=True, data_only=True)
-    sheet = book["Historical Records"]
-    headers = [c.value for c in next(sheet.iter_rows(min_row=1, max_row=1))]
-    rows = []
-    for row_num, values in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
-        rec = dict(zip(headers, values))
-        raw_date = rec.get("Record Date")
-        try:
-            if isinstance(raw_date, datetime): dt = raw_date.date()
-            elif isinstance(raw_date, date): dt = raw_date
-            else:
-                raw = str(raw_date).strip()
-                try: dt = datetime.strptime(raw, "%d/%m/%Y").date()
-                except ValueError: dt = datetime.strptime(raw[:10], "%Y-%m-%d").date()
-        except (ValueError, TypeError, AttributeError):
-            print(f"WARNING: history row {row_num} has an invalid date and cannot appear in date filtering: {raw_date!r}")
-            continue
-        project = str(rec.get("Project") or "").strip()
-        group = str(rec.get("Unit Group / Layout") or "").strip()
-        status_type = str(rec.get("Status Type") or "Unclassified").strip()
-        if not project or not group:
-            print(f"WARNING: history row {row_num} has no project/layout label; retained with a placeholder.")
-            project = project or "Unidentified project"
-            group = group or "Unidentified unit group"
-        try: signed = float(rec.get("Signed Units"))
-        except (ValueError, TypeError): signed = None
-        try: total = float(rec.get("Total Units"))
-        except (ValueError, TypeError): total = None
-        rows.append({"date": dt, "project": project, "group": group, "status": status_type,
-                     "signed": signed, "total": total,
-                     "raw": str(rec.get("Raw Recorded Status") or ""),
-                     "source": str(rec.get("Source") or "")})
-        if status_type.lower() in ("", "unclassified"):
-            print(f"WARNING: history row {row_num} has a blank/unclassified status ({project} / {group}, {dt}); retained for review.")
-    book.close()
-    return rows
-
-
 def style_cell(cell, fill=WHITE, bold=False, color=DARK, horizontal="center", size=9):
     cell.fill = PatternFill("solid", fgColor=fill)
     cell.font = Font(name="Aptos", size=size, bold=bold, color=color)
@@ -281,15 +237,22 @@ def create_daily(records, groups, lookup, by_group):
         last_day = TODAY.day if (y, m) == (TODAY.year, TODAY.month) else monthrange(y, m)[1] if date(y, m, 1) < TODAY.replace(day=1) else 0
         month_start = date(y, m, 1)
         month_end = date(y, m, last_day) if last_day else date(y, m, monthrange(y, m)[1])
-        title(ws, len(groups) + 1, f"BROGA COMPETITOR SALES ANALYSIS | DAILY TRACKER | {month_name(y,m).upper()}",
-              "Daily validation view · Sales status is combined with unit count and percentage. Daily Change compares with the previous available signed observation; it does not sum snapshots.")
-        ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=len(groups)+1)
-        ws.cell(3, 1, "A new monthly tab is generated automatically when this report runs in a new month. Historical month tabs are retained in the regenerated workbook.")
-        ws.cell(3, 1).font = Font(italic=True, size=9, color=DARK); ws.cell(3,1).alignment = Alignment(wrap_text=True, vertical="center")
-        ws.row_dimensions[3].height = 29
-        write_group_headers(ws, groups, 5)
+        # Compact daily layout: one title row, then project/layout headers.
+        # The two explanatory rows requested for removal are intentionally omitted.
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(groups)+1)
+        c = ws.cell(1, 1, f"BROGA COMPETITOR SALES ANALYSIS | DAILY TRACKER | {month_name(y,m).upper()}")
+        c.fill = PatternFill("solid", fgColor=GREEN)
+        c.font = Font(name="Aptos Display", size=15, bold=True, color=WHITE)
+        c.alignment = Alignment(vertical="center")
+        ws.row_dimensions[1].height = 32
+        ws.sheet_view.showGridLines = False
+        ws.sheet_properties.pageSetUpPr.fitToPage = True
+        ws.page_setup.orientation = "landscape"
+        ws.page_setup.fitToWidth = 1
+        ws.page_setup.fitToHeight = 0
+        write_group_headers(ws, groups, 2)
         previous_lookup = build_previous_lookup(by_group, groups, month_start, month_end)
-        rr = 7
+        rr = 4
         for day_num in range(1, month_end.day + 1):
             dt = date(y, m, day_num)
             ws.cell(rr, 1, dt.strftime("%d %b %Y") + " · Sales Status")
@@ -318,10 +281,10 @@ def create_daily(records, groups, lookup, by_group):
                 style_cell(ws.cell(rr + 2, j, gap if gap is not None else "—"), LIGHT)
             ws.row_dimensions[rr].height = 32; ws.row_dimensions[rr+1].height = 27; ws.row_dimensions[rr+2].height = 22
             rr += 3
-        ws.freeze_panes = "B7"
-        ws.print_title_rows = "1:6"
-        ws.auto_filter.ref = f"A6:{get_column_letter(len(groups)+1)}{rr-1}"
-        outline_project_blocks(ws, groups, 7, rr - 1, header_row=5)
+        ws.freeze_panes = "B4"
+        ws.print_title_rows = "1:3"
+        ws.auto_filter.ref = f"A3:{get_column_letter(len(groups)+1)}{rr-1}"
+        outline_project_blocks(ws, groups, 4, rr - 1, header_row=2)
     wb.active = len(wb.sheetnames) - 1
     wb.save(DAILY_OUT)
 
@@ -404,140 +367,18 @@ def create_weekly(records, groups, lookup, by_group):
 
 
 
-def create_snapshot_history(records, by_group, history_rows):
-    """Create a date-filterable history including all source statuses and valid signed trends."""
-    wb = load_workbook(WEEKLY_OUT)
-    sheet_name = "Snapshot History"
-    if sheet_name in wb.sheetnames:
-        del wb[sheet_name]
-    if "Latest Snapshot Comparison" in wb.sheetnames:
-        del wb["Latest Snapshot Comparison"]
-    ws = wb.create_sheet(sheet_name, 0)
-    headers = [
-        "Observation Date", "Project", "Unit Group / Layout", "Status Type", "Signed Units",
-        "Total Units", "Signed %", "Previous Observation Date", "Days Since Previous Observation",
-        "Change in Signed Units", "Change in Signed Percentage Points", "Source Status Text",
-        "Data Quality / Interpretation"
-    ]
-    title(ws, len(headers), "BROGA COMPETITOR SALES ANALYSIS | SNAPSHOT HISTORY",
-          "All dated source-history rows are retained, including non-signed and unclassified statuses. Only valid signed observations contribute to change calculations. Use the filter on Observation Date; other columns intentionally have no filter dropdown.")
-    header_row = 4
-    for col, header in enumerate(headers, 1):
-        style_cell(ws.cell(header_row, col, header), BROWN, True, WHITE, size=9)
-    ws.row_dimensions[header_row].height = 42
-    rr = header_row + 1
-    written_keys = set()
-    # Valid signed observations first; retain previous-valid-observation deltas by group.
-    for group_key in sorted(by_group, key=lambda x: (x[0].casefold(), x[1].casefold())):
-        observations = sorted(by_group[group_key], key=lambda x: x["date"])
-        previous = None
-        for current in observations:
-            key = (current["date"], current["project"], current["group"])
-            written_keys.add(key)
-            gap = (current["date"] - previous["date"]).days if previous else None
-            signed_change = current["signed"] - previous["signed"] if previous else None
-            current_pct = current["signed"] / current["total"] if current["total"] else None
-            previous_pct = previous["signed"] / previous["total"] if previous and previous["total"] else None
-            pp_change = (current_pct - previous_pct) * 100 if current_pct is not None and previous_pct is not None else None
-            notes = []
-            if previous is None:
-                notes.append("Baseline: no earlier valid signed observation")
-            else:
-                if current["total"] != previous["total"]:
-                    notes.append("Total-unit denominator changed; review release/scope")
-                if gap > 1:
-                    notes.append(f"{gap}-day gap; change is not daily movement")
-                if signed_change < 0:
-                    notes.append("Signed count decreased; verify source/status correction")
-            if not notes: notes.append("Comparable signed observation")
-            values = [current["date"], current["project"], current["group"], "Signed",
-                      current["signed"], current["total"], current_pct,
-                      previous["date"] if previous else None, gap, signed_change, pp_change,
-                      "", "; ".join(notes)]
-            for col, value in enumerate(values, 1):
-                cell = ws.cell(rr, col, value)
-                style_cell(cell, WHITE if rr % 2 else LIGHT, color=DARK,
-                           horizontal="left" if col in (2, 3, 12, 13) else "center", size=9)
-            ws.cell(rr, 1).number_format = "dd mmm yyyy"
-            ws.cell(rr, 6).number_format = "0"
-            ws.cell(rr, 7).number_format = "0.0%"
-            ws.cell(rr, 8).number_format = "dd mmm yyyy"
-            ws.cell(rr, 10).number_format = "+0;-0;0"
-            ws.cell(rr, 11).number_format = "+0.0;-0.0;0.0"
-            if signed_change is not None:
-                ws.cell(rr, 10).font = Font(name="Aptos", size=9, bold=True, color=("C00000" if signed_change < 0 else DARK))
-            if pp_change is not None:
-                ws.cell(rr, 11).font = Font(name="Aptos", size=9, bold=True, color=("C00000" if pp_change < 0 else DARK))
-            rr += 1
-            previous = current
-    # Keep dated non-signed, unknown-status, and invalid-signed rows for date completeness/audit.
-    for item in sorted(history_rows, key=lambda x: (x["date"], x["project"].casefold(), x["group"].casefold(), x["status"].casefold())):
-        key = (item["date"], item["project"], item["group"])
-        status_lower = item["status"].strip().lower()
-        valid_signed = status_lower == "signed" and item["signed"] is not None and item["total"] is not None and item["total"] > 0 and 0 <= item["signed"] <= item["total"]
-        if valid_signed and key in written_keys:
-            continue
-        notes = []
-        if status_lower in ("", "unclassified"):
-            notes.append("Blank/unclassified status; verify source")
-        elif status_lower != "signed":
-            notes.append("Non-signed status retained for audit; excluded from signed trend")
-        else:
-            notes.append("Signed status has invalid/missing unit counts; verify source")
-        pct = item["signed"] / item["total"] if valid_signed else None
-        values = [item["date"], item["project"], item["group"], item["status"],
-                  item["signed"] if item["signed"] is not None else None,
-                  item["total"] if item["total"] is not None else None, pct,
-                  None, None, None, None, item["raw"], "; ".join(notes)]
-        for col, value in enumerate(values, 1):
-            cell = ws.cell(rr, col, value)
-            style_cell(cell, AMBER if col == 13 else (WHITE if rr % 2 else LIGHT), color=DARK,
-                       horizontal="left" if col in (2, 3, 12, 13) else "center", size=9)
-        ws.cell(rr, 1).number_format = "dd mmm yyyy"
-        ws.cell(rr, 7).number_format = "0.0%"
-        rr += 1
-    if rr == header_row + 1:
-        ws.cell(rr, 1, "No dated source-history rows found")
-    else:
-        # Keep the audit table in chronological order while preserving row styling.
-        stored_rows = []
-        for row_idx in range(header_row + 1, rr):
-            cells = [ws.cell(row_idx, col) for col in range(1, len(headers) + 1)]
-            values = [cell.value for cell in cells]
-            styles = [copy(cell._style) for cell in cells]
-            key_date = values[0].date() if isinstance(values[0], datetime) else values[0]
-            stored_rows.append(((key_date, str(values[1] or "").casefold(), str(values[2] or "").casefold(), str(values[3] or "").casefold()), values, styles))
-        stored_rows.sort(key=lambda item: item[0])
-        for row_idx, (_, values, styles) in enumerate(stored_rows, start=header_row + 1):
-            for col, (value, style) in enumerate(zip(values, styles), start=1):
-                cell = ws.cell(row_idx, col, value)
-                cell._style = style
-    # Only Observation Date gets a filter dropdown.
-    ws.auto_filter.ref = f"A{header_row}:A{max(header_row, rr - 1)}"
-    ws.freeze_panes = "A5"
-    widths = [18, 28, 34, 17, 14, 13, 12, 20, 23, 17, 24, 45, 58]
-    for col, width in enumerate(widths, 1): ws.column_dimensions[get_column_letter(col)].width = width
-    ws.sheet_view.showGridLines = False
-    ws.sheet_properties.pageSetUpPr.fitToPage = True
-    ws.page_setup.orientation = "landscape"
-    ws.page_setup.fitToWidth = 1
-    ws.page_setup.fitToHeight = 0
-    ws.print_title_rows = "1:4"
-    ws.row_dimensions[2].height = 34
-    wb.save(WEEKLY_OUT)
-
 def main():
     records=read_records()
     if not records: raise ValueError("No valid signed records found in Historical Records.")
-    history_rows=read_history_rows()
     groups, lookup, by_group = group_records(records)
     create_daily(records, groups, lookup, by_group)
     create_weekly(records, groups, lookup, by_group)
-    create_snapshot_history(records, by_group, history_rows)
     daily_tabs = load_workbook(DAILY_OUT, read_only=True).sheetnames
     weekly_tabs = load_workbook(WEEKLY_OUT, read_only=True).sheetnames
+    if "Snapshot History" in weekly_tabs:
+        raise AssertionError("Snapshot History should not be present in the weekly workbook.")
     print(f"Created {DAILY_OUT.name} with {len(daily_tabs)} tabs ({', '.join(daily_tabs)})")
-    print(f"Created {WEEKLY_OUT.name} with {len(weekly_tabs)} tabs ({', '.join(weekly_tabs)}), including date-filtered snapshot history and Monday–Sunday monthly tabs")
+    print(f"Created {WEEKLY_OUT.name} with {len(weekly_tabs)} tabs ({', '.join(weekly_tabs)}), Monday–Sunday monthly tabs only")
     print(f"Source: {len(records)} valid signed observations across {len(groups)} project/layout groups.")
 
 if __name__ == "__main__":
