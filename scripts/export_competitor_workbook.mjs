@@ -12,8 +12,10 @@ function loadEmbeddedData(html) {
   const startAt = html.indexOf(marker);
   if (startAt < 0) throw new Error('Could not find the embedded DATA object in index.html.');
   const start = startAt + marker.length;
-  const end = html.indexOf(';\nconst $', start);
-  if (end < 0) throw new Error('Could not locate the end of the embedded DATA object.');
+  // Accept LF or CRLF line endings (Windows checkouts convert them).
+  const offset = html.slice(start).search(/;\r?\nconst \$/);
+  if (offset < 0) throw new Error('Could not locate the end of the embedded DATA object.');
+  const end = start + offset;
   return JSON.parse(html.slice(start, end));
 }
 function isSigned(c) {
@@ -301,7 +303,11 @@ hs.getRow(1).eachCell((cell) => {
 for (const r of history) {
   const comps = r.components ?? [];
   if (!comps.length) {
-    hs.addRow([formatDate(r.date),r.project,'No group details','Unclassified','','','','No parseable group-level values: '+String(r.raw ?? ''),r.source]);
+    // "Yet to sign" / "Yet to launch" are valid source statuses, not parsing failures.
+    const raw = String(r.raw ?? '');
+    const type = /yet to launch/i.test(raw) ? 'Yet to launch' : /yet to sign/i.test(raw) ? 'Yet to sign' : 'Unclassified';
+    const note = type === 'Unclassified' ? 'No parseable group-level values: ' + raw : raw;
+    hs.addRow([formatDate(r.date),r.project,'No group details',type,'','','',note,r.source]);
     continue;
   }
   comps.forEach((c, idx) => {
