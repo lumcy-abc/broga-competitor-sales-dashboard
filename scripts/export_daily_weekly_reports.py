@@ -170,8 +170,7 @@ def delta(cur, prev):
     gap = (cur["date"] - prev["date"]).days
     gap_label = f"over {gap} day(s)" if gap > 1 else "over 1 day"
     if cur["total"] != prev["total"]:
-        movement = "Total increased" if cur["total"] > prev["total"] else "Total decreased"
-        return f"{movement} — review ({prev['total']} → {cur['total']} units; {prev['date']:%d %b} → {cur['date']:%d %b}; {gap_label})"
+        return f"Total changed — review ({prev['date']:%d %b} → {cur['date']:%d %b}; {gap_label})"
     n = int(cur["signed"] - prev["signed"])
     change = "No change" if n == 0 else f"{n:+d} signed"
     return f"{change} ({prev['date']:%d %b} → {cur['date']:%d %b}; {gap_label})"
@@ -184,8 +183,7 @@ def daily_change_and_gap(cur, prev):
         return "No prior observation", None
     gap = (cur["date"] - prev["date"]).days
     if cur["total"] != prev["total"]:
-        movement = "Total increased" if cur["total"] > prev["total"] else "Total decreased"
-        return f"{movement} — review scope/release ({int(prev['total'])} → {int(cur['total'])} units)", gap
+        return "Total changed — review scope/release", gap
     change = int(cur["signed"] - prev["signed"])
     return ("No change" if change == 0 else f"{change:+d} signed"), gap
 
@@ -392,7 +390,7 @@ def create_weekly(records, groups, lookup, by_group):
                         elif not cur: val="In progress" if start<=TODAY<=end else "No record this week"
                         elif not prev: val="Baseline / no prior-week record"
                         else: val=delta(cur,prev)
-                        fill=PALE if (str(val).startswith("+") or val=="No change") else AMBER if ("review" in str(val).lower() or "total increased" in str(val).lower()) else CREAM
+                        fill=PALE if (str(val).startswith("+") or val=="No change") else AMBER if "review" in str(val).lower() else CREAM
                     style_cell(ws.cell(rr,j,val),fill,kind=="change")
                 ws.row_dimensions[rr].height=32 if kind=="status" else 28; rr+=1
         ws.merge_cells(start_row=rr+1,start_column=1,end_row=rr+1,end_column=len(groups)+1)
