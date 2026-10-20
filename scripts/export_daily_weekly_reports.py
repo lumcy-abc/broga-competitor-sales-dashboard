@@ -5,6 +5,7 @@ Run after scripts/export_competitor_workbook.mjs. Reads the generated workbook's
 Historical Records sheet; does not alter the TEDUH collector or its JSON history.
 """
 import json
+import re
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from collections import defaultdict
@@ -558,6 +559,55 @@ def create_snapshot_history(records, by_group, history_rows):
     ws.print_title_rows = "1:3"
     wb.save(WEEKLY_OUT)
 
+
+def dashboard_endpoint_codes():
+    """TEDUH codes the dashboard collects, read from the DATA object embedded in index.html."""
+    html = (ROOT / "index.html").read_text(encoding="utf-8")
+    start = html.index("const DATA=") + len("const DATA=")
+    end = start + re.search(r";\r?\nconst \$", html[start:]).start()
+    return {e["project"]: e["id"] for e in json.loads(html[start:end]).get("endpoints", [])}
+
+
+def create_reference_sheet():
+    """Add the TEDUH search reference (keyword, project code, data link) for checking projects in a browser."""
+    reference = json.loads((ROOT / "data" / "teduh-reference.json").read_text(encoding="utf-8"))["projects"]
+    collected = dashboard_endpoint_codes()
+    for item in reference:
+        code = collected.get(item["project"])
+        if code and item["code"] and code != item["code"]:
+            raise ValueError(f"TEDUH reference code for {item['project']} is {item['code']} but the dashboard collects {code}; "
+                             "update data/teduh-reference.json.")
+    wb = load_workbook(WEEKLY_OUT)
+    name = "TEDUH Search Reference"
+    if name in wb.sheetnames:
+        del wb[name]
+    ws = wb.create_sheet(name)
+    headers = ["BROGA Developer", "Search Keyword", "Project Code and Name", "TEDUH Data Link"]
+    title(ws, len(headers), "BROGA COMPETITOR SALES ANALYSIS | TEDUH SEARCH REFERENCE")
+    for col, header in enumerate(headers, 1):
+        style_cell(ws.cell(3, col, header), BROWN, True, WHITE, size=9)
+    ws.row_dimensions[3].height = 28
+    for rr, item in enumerate(reference, start=4):
+        code_name = f"{item['code']}\n{item['teduhName']}" if item["code"] else "Not yet on TEDUH"
+        values = [item["project"], item["keyword"] or "—", code_name, ""]
+        fill = WHITE if rr % 2 == 0 else LIGHT
+        for col, value in enumerate(values, 1):
+            style_cell(ws.cell(rr, col, value), fill, col == 1, horizontal="left", size=9)
+        if item["code"]:
+            link = ws.cell(rr, 4, f"Open {item['code']}")
+            link.hyperlink = f"https://teduh.kpkt.gov.my/api/unit-projek-swasta/{item['code']}"
+            link.font = Font(name="Aptos", size=9, color="1769AA", underline="single")
+        ws.row_dimensions[rr].height = 30
+    for col, width in enumerate([32, 22, 30, 18], 1):
+        ws.column_dimensions[get_column_letter(col)].width = width
+    ws.freeze_panes = "A4"
+    # Keep the newest monthly tab as the one that opens.
+    months = [s for s in wb.sheetnames if re.fullmatch(r"[A-Z][a-z]{2} \d{4}", s)]
+    if months:
+        wb.active = wb.sheetnames.index(months[-1])
+    wb.save(WEEKLY_OUT)
+
+
 def check_source_is_current(history_rows):
     """Refuse to build reports from an analysis workbook older than the saved TEDUH history."""
     teduh = ROOT / "data" / "teduh-history.json"
@@ -629,6 +679,7 @@ def main():
     create_daily(records, groups, lookup, by_group)
     create_weekly(records, groups, lookup, by_group)
     create_snapshot_history(records, by_group, history_rows)
+    create_reference_sheet()
     validate_outputs(records, groups, lookup)
     daily_tabs = load_workbook(DAILY_OUT, read_only=True).sheetnames
     weekly_tabs = load_workbook(WEEKLY_OUT, read_only=True).sheetnames

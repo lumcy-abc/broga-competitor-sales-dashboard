@@ -1,0 +1,19 @@
+{
+  "about": "TEDUH search reference for each BROGA competitor, copied from the 'Teduh Search Reference' sheet of Broga Competitor Sales Status 13102026.xlsx. Shown as a sheet in Broga_Weekly_Tracking.xlsx.",
+  "projects": [
+    { "project": "Balau Homes 2A", "keyword": "Pemaju: Boustead", "code": "20094-4", "teduhName": "MUTIARA HILLS" },
+    { "project": "Balau Homes 2C", "keyword": "Pemaju: Boustead", "code": "20094-5", "teduhName": "MUTIARA HILLS, SEMENYIH" },
+    { "project": "Springvale Sempurna Heights", "keyword": "springvale", "code": "19321-4", "teduhName": "SPRINGVALE SEMPURNA HEIGHT" },
+    { "project": "Zinnia Residences", "keyword": "Pemaju: crimson villa", "code": "19959-3", "teduhName": "TAMAN AKASIA" },
+    { "project": "M Legasi Phase 1", "keyword": "m legasi", "code": "30897-1", "teduhName": "M LEGASI" },
+    { "project": "M Legasi Phase 2", "keyword": "m legasi", "code": "30897-2", "teduhName": "M LEGASI" },
+    { "project": "M Legasi Phase 3", "keyword": "m legasi", "code": "30897-3", "teduhName": "M LEGASI" },
+    { "project": "Sapphire Residence @Diamond City", "keyword": "sapphire", "code": "13170-7", "teduhName": "SAPPHIRE RESIDENCE" },
+    { "project": "Birchpark @Eco Forest", "keyword": "birchpark", "code": "19150-17", "teduhName": "BIRCHPARK" },
+    { "project": "Chorus @Setia Ecohill 2", "keyword": "ecohill", "code": "14421-21", "teduhName": "SETIA ECOHILL 2" },
+    { "project": "Banyan @Setia Ecohill 2", "keyword": "ecohill", "code": "14421-22", "teduhName": "SETIA ECOHILL 2" },
+    { "project": "Amani Gallery Homes", "keyword": "amani", "code": "6868-20", "teduhName": "GALLERY HOMES - AMANI" },
+    { "project": "Majestic Flora", "keyword": "", "code": "", "teduhName": "" },
+    { "project": "Astrea @Eco Radiance", "keyword": "", "code": "", "teduhName": "" }
+  ]
+}
