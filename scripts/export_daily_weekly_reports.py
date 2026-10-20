@@ -23,6 +23,17 @@ WHITE, DARK, GRAY, LINE, PALE, AMBER, LIGHT = "FFFFFF", "263126", "666666", "D7D
 TODAY = datetime.now(ZoneInfo("Asia/Kuala_Lumpur")).date()
 
 
+def canonical_group(project, group):
+    """Normalize legacy labels without merging unrelated unit groups."""
+    project_key = str(project or "").strip().casefold()
+    group_text = str(group or "").strip()
+    if project_key == "springvale sempurna heights" and group_text.casefold() == "group 1":
+        return "Group B · rear-kitchen layout"
+    if project_key == "amani gallery homes" and group_text.casefold() in ("terrace houses", "terrace house"):
+        return "20' x 70' / 20' x 72'"
+    return group_text
+
+
 def read_records():
     if not SOURCE.exists():
         raise FileNotFoundError(f"Missing {SOURCE.name}. Run the existing Excel export first.")
@@ -67,7 +78,7 @@ def read_records():
             print(f"WARNING: row {row_num}: invalid counts signed={signed}, total={total}; skipped.")
             continue
         project = str(rec.get("Project") or "").strip()
-        group = str(rec.get("Unit Group / Layout") or "").strip()
+        group = canonical_group(project, str(rec.get("Unit Group / Layout") or "").strip())
         if not project or not group:
             skipped_fields += 1
             print(f"WARNING: row {row_num}: missing project/layout; skipped.")
@@ -113,7 +124,7 @@ def read_history_rows():
             print(f"WARNING: history row {row_num} has an invalid date and cannot appear in date filtering: {raw_date!r}")
             continue
         project = str(rec.get("Project") or "").strip()
-        group = str(rec.get("Unit Group / Layout") or "").strip()
+        group = canonical_group(project, str(rec.get("Unit Group / Layout") or "").strip())
         status_type = str(rec.get("Status Type") or "Unclassified").strip()
         if not project or not group:
             print(f"WARNING: history row {row_num} has no project/layout label; retained with a placeholder.")
@@ -141,17 +152,13 @@ def style_cell(cell, fill=WHITE, bold=False, color=DARK, horizontal="center", si
     cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
 
-def title(ws, last_col, heading, subtitle):
+def title(ws, last_col, heading, subtitle=None):
+    """Title-only top row; explanatory rows were removed by user request."""
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
     c = ws.cell(1, 1, heading); c.fill = PatternFill("solid", fgColor=GREEN)
     c.font = Font(name="Aptos Display", size=15, bold=True, color=WHITE)
     c.alignment = Alignment(vertical="center")
     ws.row_dimensions[1].height = 32
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=last_col)
-    c = ws.cell(2, 1, subtitle); c.fill = PatternFill("solid", fgColor=CREAM)
-    c.font = Font(italic=True, color="8B5E34", size=10)
-    c.alignment = Alignment(vertical="center", wrap_text=True)
-    ws.row_dimensions[2].height = 27
     ws.sheet_view.showGridLines = False
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.page_setup.orientation = "landscape"
@@ -269,62 +276,53 @@ def outline_project_blocks(ws, groups, first_data_row, last_data_row, header_row
 
 
 def create_daily(records, groups, lookup, by_group):
+    """Create a single current-month daily workbook, without explanatory rows."""
     wb = Workbook()
-    wb.remove(wb.active)
-    # Daily tabs are created only for months with valid observations, plus the current month.
-    # This preserves useful history without producing empty tabs for months with no records.
-    data_months = {(r["date"].year, r["date"].month) for r in records}
-    data_months.add((TODAY.year, TODAY.month))
-    months = sorted(data_months)
-    for y, m in months:
-        ws = wb.create_sheet(month_name(y, m))
-        last_day = TODAY.day if (y, m) == (TODAY.year, TODAY.month) else monthrange(y, m)[1] if date(y, m, 1) < TODAY.replace(day=1) else 0
-        month_start = date(y, m, 1)
-        month_end = date(y, m, last_day) if last_day else date(y, m, monthrange(y, m)[1])
-        title(ws, len(groups) + 1, f"BROGA COMPETITOR SALES ANALYSIS | DAILY TRACKER | {month_name(y,m).upper()}",
-              "Daily validation view · Sales status is combined with unit count and percentage. Daily Change compares with the previous available signed observation; it does not sum snapshots.")
-        ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=len(groups)+1)
-        ws.cell(3, 1, "A new monthly tab is generated automatically when this report runs in a new month. Historical month tabs are retained in the regenerated workbook.")
-        ws.cell(3, 1).font = Font(italic=True, size=9, color=DARK); ws.cell(3,1).alignment = Alignment(wrap_text=True, vertical="center")
-        ws.row_dimensions[3].height = 29
-        write_group_headers(ws, groups, 5)
-        previous_lookup = build_previous_lookup(by_group, groups, month_start, month_end)
-        rr = 7
-        for day_num in range(1, month_end.day + 1):
-            dt = date(y, m, day_num)
-            ws.cell(rr, 1, dt.strftime("%d %b %Y") + " · Sales Status")
-            ws.cell(rr + 1, 1, "Change vs Previous Observation")
-            ws.cell(rr + 2, 1, "Days Since Previous Observation")
-            style_cell(ws.cell(rr, 1), BROWN, True, WHITE, "left")
-            style_cell(ws.cell(rr + 1, 1), CREAM, True, DARK, "left")
-            style_cell(ws.cell(rr + 2, 1), SAGE, True, DARK, "left")
-            for j, g in enumerate(groups, 2):
-                cur = lookup.get((dt, g))
-                prev = previous_lookup.get((dt, g))
-                val = status(cur) if cur else ("No signed observation" if dt <= TODAY else "Not yet reached")
-                change, gap = daily_change_and_gap(cur, prev)
-                style_cell(ws.cell(rr, j, val), SAGE if cur else LIGHT)
-                if not cur:
-                    change = "No observation" if dt <= TODAY else "Not yet reached"
-                if "review" in change.lower():
-                    fill = AMBER
-                elif change.startswith("+"):
-                    fill = PALE
-                elif change.startswith("-"):
-                    fill = "FCE4D6"
-                else:
-                    fill = LIGHT
-                style_cell(ws.cell(rr + 1, j, change), fill, True)
-                style_cell(ws.cell(rr + 2, j, gap if gap is not None else "—"), LIGHT)
-            ws.row_dimensions[rr].height = 32; ws.row_dimensions[rr+1].height = 27; ws.row_dimensions[rr+2].height = 22
-            rr += 3
-        ws.freeze_panes = "B7"
-        ws.print_title_rows = "1:6"
-        ws.auto_filter.ref = f"A6:{get_column_letter(len(groups)+1)}{rr-1}"
-        outline_project_blocks(ws, groups, 7, rr - 1, header_row=5)
-    wb.active = len(wb.sheetnames) - 1
+    ws = wb.active
+    ws.title = month_name(TODAY.year, TODAY.month)
+    y, m = TODAY.year, TODAY.month
+    last_day = TODAY.day
+    month_start = date(y, m, 1)
+    month_end = TODAY
+    title(ws, len(groups) + 1, f"BROGA COMPETITOR SALES ANALYSIS | DAILY TRACKER | {month_name(y,m).upper()}")
+    write_group_headers(ws, groups, 2)
+    previous_lookup = build_previous_lookup(by_group, groups, month_start, month_end)
+    rr = 5
+    for day_num in range(1, month_end.day + 1):
+        dt = date(y, m, day_num)
+        ws.cell(rr, 1, dt.strftime("%d %b %Y") + " · Sales Status")
+        ws.cell(rr + 1, 1, "Change vs Previous Observation")
+        ws.cell(rr + 2, 1, "Days Since Previous Observation")
+        style_cell(ws.cell(rr, 1), BROWN, True, WHITE, "left")
+        style_cell(ws.cell(rr + 1, 1), CREAM, True, DARK, "left")
+        style_cell(ws.cell(rr + 2, 1), SAGE, True, DARK, "left")
+        for j, g in enumerate(groups, 2):
+            cur = lookup.get((dt, g))
+            prev = previous_lookup.get((dt, g))
+            val = status(cur) if cur else "No signed observation"
+            change, gap = daily_change_and_gap(cur, prev)
+            style_cell(ws.cell(rr, j, val), SAGE if cur else LIGHT)
+            if not cur:
+                change = "No observation"
+            if "review" in change.lower() or "scope" in change.lower():
+                fill = AMBER
+            elif str(change).startswith("+"):
+                fill = PALE
+            elif str(change).startswith("-"):
+                fill = "FCE4D6"
+            else:
+                fill = LIGHT
+            style_cell(ws.cell(rr + 1, j, change), fill, True)
+            style_cell(ws.cell(rr + 2, j, gap if gap is not None else "—"), LIGHT)
+        ws.row_dimensions[rr].height = 32
+        ws.row_dimensions[rr+1].height = 27
+        ws.row_dimensions[rr+2].height = 22
+        rr += 3
+    ws.freeze_panes = "B4"
+    ws.print_title_rows = "1:3"
+    ws.auto_filter.ref = f"A3:{get_column_letter(len(groups)+1)}{rr-1}"
+    outline_project_blocks(ws, groups, 4, rr - 1, header_row=2)
     wb.save(DAILY_OUT)
-
 
 def month_week_periods(y, m):
     first = date(y, m, 1)
@@ -393,19 +391,15 @@ def create_weekly(records, groups, lookup, by_group):
                         fill=PALE if (str(val).startswith("+") or val=="No change") else AMBER if "review" in str(val).lower() else CREAM
                     style_cell(ws.cell(rr,j,val),fill,kind=="change")
                 ws.row_dimensions[rr].height=32 if kind=="status" else 28; rr+=1
-        ws.merge_cells(start_row=rr+1,start_column=1,end_row=rr+1,end_column=len(groups)+1)
-        c=ws.cell(rr+1,1,"Monthly tabs are generated from available history. Weeks are Monday–Sunday; weeks spanning month boundaries are shown in each month they overlap.")
-        c.fill=PatternFill("solid",fgColor=CREAM); c.font=Font(italic=True,color="8B5E34",size=9); c.alignment=Alignment(wrap_text=True,vertical="center")
-        ws.row_dimensions[rr+1].height=30
         ws.freeze_panes="B4"; ws.print_title_rows="1:3"
-        outline_project_blocks(ws, groups, 4, rr + 1, header_row=2)
+        outline_project_blocks(ws, groups, 4, rr - 1, header_row=2)
     wb.active=len(wb.sheetnames)-1
     wb.save(WEEKLY_OUT)
 
 
 
 def create_snapshot_history(records, by_group, history_rows):
-    """Create a date-filterable history including all source statuses and valid signed trends."""
+    """Create a compact eight-column audit table with valid signed-trend changes."""
     wb = load_workbook(WEEKLY_OUT)
     sheet_name = "Snapshot History"
     if sheet_name in wb.sheetnames:
@@ -414,116 +408,132 @@ def create_snapshot_history(records, by_group, history_rows):
         del wb["Latest Snapshot Comparison"]
     ws = wb.create_sheet(sheet_name, 0)
     headers = [
-        "Observation Date", "Project", "Unit Group / Layout", "Status Type", "Signed Units",
-        "Total Units", "Signed %", "Previous Observation Date", "Days Since Previous Observation",
-        "Change in Signed Units", "Change in Signed Percentage Points", "Source Status Text",
-        "Data Quality / Interpretation"
+        "Observation Date", "Project", "Unit Group / Layout", "Status",
+        "Units / Total", "Signed %", "Change vs Previous", "Source / Validation Notes"
     ]
-    title(ws, len(headers), "BROGA COMPETITOR SALES ANALYSIS | SNAPSHOT HISTORY",
-          "All dated source-history rows are retained, including non-signed and unclassified statuses. Only valid signed observations contribute to change calculations. Use the filter on Observation Date; other columns intentionally have no filter dropdown.")
-    header_row = 4
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
+    c = ws.cell(1, 1, "BROGA COMPETITOR SALES ANALYSIS | SNAPSHOT HISTORY")
+    c.fill = PatternFill("solid", fgColor=GREEN)
+    c.font = Font(name="Aptos Display", size=15, bold=True, color=WHITE)
+    c.alignment = Alignment(vertical="center")
+    ws.row_dimensions[1].height = 32
+    header_row = 3
     for col, header in enumerate(headers, 1):
         style_cell(ws.cell(header_row, col, header), BROWN, True, WHITE, size=9)
-    ws.row_dimensions[header_row].height = 42
-    rr = header_row + 1
-    written_keys = set()
-    # Valid signed observations first; retain previous-valid-observation deltas by group.
+    ws.row_dimensions[header_row].height = 34
+
+    # One delta per project + unit group, calculated only from valid signed observations.
+    trend = {}
     for group_key in sorted(by_group, key=lambda x: (x[0].casefold(), x[1].casefold())):
         observations = sorted(by_group[group_key], key=lambda x: x["date"])
         previous = None
         for current in observations:
-            key = (current["date"], current["project"], current["group"])
-            written_keys.add(key)
             gap = (current["date"] - previous["date"]).days if previous else None
             signed_change = current["signed"] - previous["signed"] if previous else None
             current_pct = current["signed"] / current["total"] if current["total"] else None
             previous_pct = previous["signed"] / previous["total"] if previous and previous["total"] else None
-            pp_change = (current_pct - previous_pct) * 100 if current_pct is not None and previous_pct is not None else None
-            notes = []
+            pp_change = ((current_pct - previous_pct) * 100
+                         if current_pct is not None and previous_pct is not None else None)
+            total_changed = bool(previous and current["total"] != previous["total"])
+            pieces = []
             if previous is None:
-                notes.append("Baseline: no earlier valid signed observation")
+                change_text = "Baseline"
+                pieces.append("No earlier valid signed observation")
             else:
-                if current["total"] != previous["total"]:
-                    notes.append("Total-unit denominator changed; review release/scope")
-                if gap > 1:
-                    notes.append(f"{gap}-day gap; change is not daily movement")
+                change_parts = []
+                if signed_change is not None:
+                    change_parts.append(f"{signed_change:+g} signed")
+                if pp_change is not None:
+                    change_parts.append(f"{pp_change:+.1f} pp")
+                change_text = " · ".join(change_parts) if change_parts else "Change unavailable"
+                if total_changed:
+                    diff = current["total"] - previous["total"]
+                    pieces.append(f"TOTAL CHANGED: {previous['total']:g} → {current['total']:g} ({diff:+g}); percentage recalculated")
+                if gap and gap > 1:
+                    pieces.append(f"{gap}-day gap; not daily movement")
                 if signed_change < 0:
-                    notes.append("Signed count decreased; verify source/status correction")
-            if not notes: notes.append("Comparable signed observation")
-            values = [current["date"], current["project"], current["group"], "Signed",
-                      current["signed"], current["total"], current_pct,
-                      previous["date"] if previous else None, gap, signed_change, pp_change,
-                      "", "; ".join(notes)]
-            for col, value in enumerate(values, 1):
-                cell = ws.cell(rr, col, value)
-                style_cell(cell, WHITE if rr % 2 else LIGHT, color=DARK,
-                           horizontal="left" if col in (2, 3, 12, 13) else "center", size=9)
-            ws.cell(rr, 1).number_format = "dd mmm yyyy"
-            ws.cell(rr, 6).number_format = "0"
-            ws.cell(rr, 7).number_format = "0.0%"
-            ws.cell(rr, 8).number_format = "dd mmm yyyy"
-            ws.cell(rr, 10).number_format = "+0;-0;0"
-            ws.cell(rr, 11).number_format = "+0.0;-0.0;0.0"
-            if signed_change is not None:
-                ws.cell(rr, 10).font = Font(name="Aptos", size=9, bold=True, color=("C00000" if signed_change < 0 else DARK))
-            if pp_change is not None:
-                ws.cell(rr, 11).font = Font(name="Aptos", size=9, bold=True, color=("C00000" if pp_change < 0 else DARK))
-            rr += 1
+                    pieces.append("Signed count decreased; verify source/status correction")
+                if not pieces:
+                    pieces.append("No scope change detected")
+            trend[(current["date"], current["project"], current["group"])] = {
+                "signed": current["signed"], "total": current["total"], "pct": current_pct,
+                "change": change_text, "signed_change": signed_change, "pp_change": pp_change,
+                "total_changed": total_changed, "notes": pieces,
+            }
             previous = current
-    # Keep dated non-signed, unknown-status, and invalid-signed rows for date completeness/audit.
-    for item in sorted(history_rows, key=lambda x: (x["date"], x["project"].casefold(), x["group"].casefold(), x["status"].casefold())):
+
+    rows_to_write = []
+    written_signed_keys = set()
+    for item in history_rows:
         key = (item["date"], item["project"], item["group"])
         status_lower = item["status"].strip().lower()
-        valid_signed = status_lower == "signed" and item["signed"] is not None and item["total"] is not None and item["total"] > 0 and 0 <= item["signed"] <= item["total"]
-        if valid_signed and key in written_keys:
-            continue
-        notes = []
-        if status_lower in ("", "unclassified"):
-            notes.append("Blank/unclassified status; verify source")
-        elif status_lower != "signed":
-            notes.append("Non-signed status retained for audit; excluded from signed trend")
+        valid_signed = (status_lower == "signed" and item["signed"] is not None and
+                        item["total"] is not None and item["total"] > 0 and
+                        0 <= item["signed"] <= item["total"])
+        if valid_signed and key in trend:
+            # Use the canonical signed observation once, not a duplicate source row.
+            if key in written_signed_keys:
+                continue
+            written_signed_keys.add(key)
+            t = trend[key]
+            units_total = f"{t['signed']:g} / {t['total']:g}"
+            signed_pct = t["pct"]
+            change_text = t["change"]
+            notes = [str(item.get("raw") or "Source status retained")]
+            notes.extend(t["notes"])
+            row_fill = AMBER if t["total_changed"] else (WHITE if len(rows_to_write) % 2 == 0 else LIGHT)
+            change_color = ("16803D" if (t["signed_change"] or 0) > 0 else
+                            "C00000" if (t["signed_change"] or 0) < 0 or t["total_changed"] else DARK)
+            rows_to_write.append({"values": [item["date"], item["project"], item["group"], item["status"],
+                                               units_total, signed_pct, change_text, "; ".join(x for x in notes if x)],
+                                  "fill": row_fill, "change_color": change_color,
+                                  "scope": t["total_changed"]})
         else:
-            notes.append("Signed status has invalid/missing unit counts; verify source")
-        pct = item["signed"] / item["total"] if valid_signed else None
-        values = [item["date"], item["project"], item["group"], item["status"],
-                  item["signed"] if item["signed"] is not None else None,
-                  item["total"] if item["total"] is not None else None, pct,
-                  None, None, None, None, item["raw"], "; ".join(notes)]
-        for col, value in enumerate(values, 1):
+            if status_lower in ("", "unclassified"):
+                note = "Blank/unclassified status; verify source"
+            elif status_lower != "signed":
+                note = "Non-signed status retained for audit; excluded from signed trend"
+            else:
+                note = "Signed status has invalid/missing unit counts; verify source"
+            units = item["signed"] if item["signed"] is not None else None
+            total = item["total"] if item["total"] is not None else None
+            unit_text = f"{units:g} / {total:g}" if units is not None and total is not None else (f"— / {total:g}" if total is not None else "—")
+            pct = (units / total) if valid_signed and total else None
+            rows_to_write.append({"values": [item["date"], item["project"], item["group"], item["status"],
+                                               unit_text, pct, "Not applicable", f"{item.get('raw') or ''}; {note}".strip("; ")],
+                                  "fill": AMBER if status_lower in ("", "unclassified") else (WHITE if len(rows_to_write) % 2 == 0 else LIGHT),
+                                  "change_color": DARK, "scope": False})
+
+    rows_to_write.sort(key=lambda x: (x["values"][0], str(x["values"][1]).casefold(),
+                                      str(x["values"][2]).casefold(), str(x["values"][3]).casefold()))
+    for rr, row in enumerate(rows_to_write, start=header_row + 1):
+        for col, value in enumerate(row["values"], 1):
             cell = ws.cell(rr, col, value)
-            style_cell(cell, AMBER if col == 13 else (WHITE if rr % 2 else LIGHT), color=DARK,
-                       horizontal="left" if col in (2, 3, 12, 13) else "center", size=9)
+            style_cell(cell, row["fill"], color=DARK,
+                       horizontal="left" if col in (2, 3, 8) else "center", size=9)
         ws.cell(rr, 1).number_format = "dd mmm yyyy"
-        ws.cell(rr, 7).number_format = "0.0%"
-        rr += 1
-    if rr == header_row + 1:
-        ws.cell(rr, 1, "No dated source-history rows found")
-    else:
-        # Keep the audit table in chronological order while preserving row styling.
-        stored_rows = []
-        for row_idx in range(header_row + 1, rr):
-            cells = [ws.cell(row_idx, col) for col in range(1, len(headers) + 1)]
-            values = [cell.value for cell in cells]
-            styles = [copy(cell._style) for cell in cells]
-            key_date = values[0].date() if isinstance(values[0], datetime) else values[0]
-            stored_rows.append(((key_date, str(values[1] or "").casefold(), str(values[2] or "").casefold(), str(values[3] or "").casefold()), values, styles))
-        stored_rows.sort(key=lambda item: item[0])
-        for row_idx, (_, values, styles) in enumerate(stored_rows, start=header_row + 1):
-            for col, (value, style) in enumerate(zip(values, styles), start=1):
-                cell = ws.cell(row_idx, col, value)
-                cell._style = style
-    # Only Observation Date gets a filter dropdown.
-    ws.auto_filter.ref = f"A{header_row}:A{max(header_row, rr - 1)}"
-    ws.freeze_panes = "A5"
-    widths = [18, 28, 34, 17, 14, 13, 12, 20, 23, 17, 24, 45, 58]
-    for col, width in enumerate(widths, 1): ws.column_dimensions[get_column_letter(col)].width = width
+        ws.cell(rr, 6).number_format = "0.0%"
+        ws.cell(rr, 7).font = Font(name="Aptos", size=9, bold=True, color=row["change_color"])
+        if row["scope"]:
+            ws.cell(rr, 7).fill = PatternFill("solid", fgColor="F4CCCC")
+            ws.cell(rr, 8).font = Font(name="Aptos", size=9, bold=True, color="C00000")
+        elif row["values"][6] not in ("Baseline", "Not applicable"):
+            ws.cell(rr, 7).fill = PatternFill("solid", fgColor="E2F0D9" if row["change_color"] == "16803D" else "FCE4D6" if row["change_color"] == "C00000" else "F7F8F4")
+        ws.row_dimensions[rr].height = 30 if row["scope"] else 24
+
+    last_row = max(header_row, header_row + len(rows_to_write))
+    # The user requested a filter on Observation Date only to keep the table uncluttered.
+    ws.auto_filter.ref = f"A{header_row}:A{last_row}"
+    ws.freeze_panes = "A4"
+    widths = [12, 22, 23, 10, 11, 9, 21, 30]
+    for col, width in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(col)].width = width
     ws.sheet_view.showGridLines = False
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.page_setup.orientation = "landscape"
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
-    ws.print_title_rows = "1:4"
-    ws.row_dimensions[2].height = 34
+    ws.print_title_rows = "1:3"
     wb.save(WEEKLY_OUT)
 
 def main():

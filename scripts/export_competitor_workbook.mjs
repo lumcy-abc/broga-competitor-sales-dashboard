@@ -42,6 +42,12 @@ function groupLabel(data, project, component, index, components) {
     if (/group\s*b|rear[- ]kitchen/.test(groupText) || Number(component.total) === 189 || Number(component.total) === 308) return 'Group B · rear-kitchen layout';
   }
 
+  // Restore agreed layout labels. Amani's status is aggregate but its two layouts
+  // must both remain as headers; do not duplicate its aggregate status into both groups.
+  const layoutLines = String(data.static?.[project]?.['land area'] ?? '').split(/\n+/).map(x => x.trim()).filter(Boolean);
+  if (project === 'Amani Gallery Homes' && layoutLines.length === 2) return `${layoutLines[0]} / ${layoutLines[1]}`;
+  if (layoutLines.length > 0 && layoutLines.length === components.length) return layoutLines[index];
+
   const ruleGroups = data.scopeRules?.[project]?.groups ?? [];
   const total = Number(component.total);
   const stableId = component.unitGroupId ?? component.groupId ?? component.apiGroupId ?? component.teduhGroupId ?? component.group_id ?? component.unitTypeId ?? component.id;
@@ -135,6 +141,10 @@ function weeklyBaseline(signedRecords, latest) {
 
 const html = fs.readFileSync(HTML_PATH, 'utf8');
 const data = loadEmbeddedData(html);
+// Baseline history comes from the original source workbook (data/history-seed.json, built by
+// scripts/import_history_from_excel.py). Falls back to the copy embedded in index.html.
+const SEED_PATH = path.join(ROOT, 'data', 'history-seed.json');
+if (fs.existsSync(SEED_PATH)) data.history = JSON.parse(fs.readFileSync(SEED_PATH, 'utf8')).records;
 const shared = JSON.parse(fs.readFileSync(HISTORY_PATH, 'utf8'));
 if (!Array.isArray(shared.records)) throw new Error('data/teduh-history.json does not contain a records array.');
 const history = mergeRecords(data, shared.records);
@@ -154,10 +164,15 @@ for (const [project, records] of byProject) {
   const latestMap = signedMap(latest);
   const previousMap = signedMap(previous);
   let labels = [...new Set([...latestMap.keys(), ...previousMap.keys()])];
+  // Headers describe the project's configured unit groups, not only groups present in
+  // the latest status cell. Keep both Amani groups visible even when only one is Signed.
   const configuredOrder = (data.scopeRules?.[project]?.groups ?? []).map(g => g.label);
-  if (configuredOrder.some(label => labels.includes(label))) {
+  const staticLayouts = String(data.static?.[project]?.['land area'] ?? '').split(/\n+/).map(x => x.trim()).filter(Boolean);
+  const headerOrder = project === 'Amani Gallery Homes' && staticLayouts.length === 2 ? [`${staticLayouts[0]} / ${staticLayouts[1]}`] : configuredOrder;
+  if (headerOrder.length) labels = [...new Set([...headerOrder, ...labels])];
+  if (headerOrder.some(label => labels.includes(label))) {
     labels.sort((a, b) => {
-      const ai = configuredOrder.indexOf(a), bi = configuredOrder.indexOf(b);
+      const ai = headerOrder.indexOf(a), bi = headerOrder.indexOf(b);
       if (ai >= 0 && bi >= 0) return ai - bi;
       if (ai >= 0) return -1;
       if (bi >= 0) return 1;
@@ -246,14 +261,19 @@ for (let i = 0; i < rowSpecs.length; i++) {
       else if (kind === 'change') {
         let value;
         if (!cur || !prev) value = (!cur && /yet to (sign|launch)/i.test(p.latest.raw ?? '')) ? 'No signed status yet' : 'Insufficient weekly history';
-        else if (Number(cur.total) !== Number(prev.total)) value = 'Total changed — review';
         else {
-          const delta = Number(cur.units) - Number(prev.units);
-          value = delta === 0 ? 'No change' : `${delta > 0 ? '+' : ''}${delta} signed`;
+          const unitDelta = Number(cur.units) - Number(prev.units);
+          const pctDelta = percent(cur) - percent(prev);
+          const unitText = unitDelta === 0 ? '0 signed change' : `${unitDelta > 0 ? '+' : ''}${unitDelta} signed`;
+          const pctText = `${pctDelta > 0 ? '+' : ''}${pctDelta.toFixed(1)} percentage points`;
+          const scopeChanged = Number(cur.total) !== Number(prev.total);
+          value = scopeChanged
+            ? `⚠ Scope changed (${prev.total} → ${cur.total}); recalculated: ${unitText}; ${pctText}`
+            : (unitDelta === 0 ? 'No change' : `${unitText}; ${pctText}`);
         }
         cell.value = value;
         if (value === 'No change') { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F2F5' } }; cell.font = { bold: true, color: { argb: 'FF5D6878' } }; }
-        else if (/review|insufficient/i.test(value)) { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF1D6' } }; cell.font = { bold: true, color: { argb: 'FFB54708' } }; }
+        else if (/scope changed|review|insufficient/i.test(value)) { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF1D6' } }; cell.font = { bold: true, color: { argb: 'FFB54708' } }; }
         else if (/signed/i.test(value)) { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F7EF' } }; cell.font = { bold: true, color: { argb: 'FF067647' } }; }
       }
       cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
