@@ -588,7 +588,7 @@ def create_reference_sheet():
         style_cell(ws.cell(3, col, header), BROWN, True, WHITE, size=9)
     ws.row_dimensions[3].height = 28
     for rr, item in enumerate(reference, start=4):
-        code_name = f"{item['code']}\n{item['teduhName']}" if item["code"] else "Not yet on TEDUH"
+        code_name = f"{item['code']}\n{item['teduhName']}" if item["code"] else "No TEDUH code recorded"
         values = [item["project"], item["keyword"] or "—", code_name, ""]
         fill = WHITE if rr % 2 == 0 else LIGHT
         for col, value in enumerate(values, 1):
