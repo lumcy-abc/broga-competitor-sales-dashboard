@@ -4,6 +4,7 @@
 Run after scripts/export_competitor_workbook.mjs. Reads the generated workbook's
 Historical Records sheet; does not alter the TEDUH collector or its JSON history.
 """
+import json
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from collections import defaultdict
@@ -170,6 +171,14 @@ def status(r):
     return f"{round(r['signed'] / r['total'] * 100)}% Signed ({int(r['signed'])}/{int(r['total'])} units)"
 
 
+def scope_change_text(cur, prev):
+    """A total-unit change is not a sale: still report signed and pp change, flagged."""
+    n = int(cur["signed"] - prev["signed"])
+    pp = (cur["signed"] / cur["total"] - prev["signed"] / prev["total"]) * 100
+    signed = "0 signed change" if n == 0 else f"{n:+d} signed"
+    return f"⚠ Scope changed ({prev['total']:g} → {cur['total']:g}); {signed}; {pp:+.1f} pp"
+
+
 def delta(cur, prev):
     """Describe the change against the previous valid observation, including its gap."""
     if not cur: return "No record"
@@ -177,7 +186,7 @@ def delta(cur, prev):
     gap = (cur["date"] - prev["date"]).days
     gap_label = f"over {gap} day(s)" if gap > 1 else "over 1 day"
     if cur["total"] != prev["total"]:
-        return f"Total changed — review ({prev['date']:%d %b} → {cur['date']:%d %b}; {gap_label})"
+        return f"{scope_change_text(cur, prev)} ({prev['date']:%d %b} → {cur['date']:%d %b}; {gap_label})"
     n = int(cur["signed"] - prev["signed"])
     change = "No change" if n == 0 else f"{n:+d} signed"
     return f"{change} ({prev['date']:%d %b} → {cur['date']:%d %b}; {gap_label})"
@@ -190,7 +199,7 @@ def daily_change_and_gap(cur, prev):
         return "No prior observation", None
     gap = (cur["date"] - prev["date"]).days
     if cur["total"] != prev["total"]:
-        return "Total changed — review scope/release", gap
+        return scope_change_text(cur, prev), gap
     change = int(cur["signed"] - prev["signed"])
     return ("No change" if change == 0 else f"{change:+d} signed"), gap
 
@@ -388,7 +397,7 @@ def create_weekly(records, groups, lookup, by_group):
                         elif not cur: val="In progress" if start<=TODAY<=end else "No record this week"
                         elif not prev: val="Baseline / no prior-week record"
                         else: val=delta(cur,prev)
-                        fill=PALE if (str(val).startswith("+") or val=="No change") else AMBER if "review" in str(val).lower() else CREAM
+                        fill=AMBER if "scope" in str(val).lower() else PALE if str(val).startswith(("+","No change")) else CREAM
                     style_cell(ws.cell(rr,j,val),fill,kind=="change")
                 ws.row_dimensions[rr].height=32 if kind=="status" else 28; rr+=1
         ws.freeze_panes="B4"; ws.print_title_rows="1:3"
@@ -427,6 +436,7 @@ def create_snapshot_history(records, by_group, history_rows):
     for group_key in sorted(by_group, key=lambda x: (x[0].casefold(), x[1].casefold())):
         observations = sorted(by_group[group_key], key=lambda x: x["date"])
         previous = None
+        scope_since = None  # (date, old total, new total) of the latest total change in this group
         for current in observations:
             gap = (current["date"] - previous["date"]).days if previous else None
             signed_change = current["signed"] - previous["signed"] if previous else None
@@ -435,6 +445,7 @@ def create_snapshot_history(records, by_group, history_rows):
             pp_change = ((current_pct - previous_pct) * 100
                          if current_pct is not None and previous_pct is not None else None)
             total_changed = bool(previous and current["total"] != previous["total"])
+            under_revised_scope = False
             pieces = []
             if previous is None:
                 change_text = "Baseline"
@@ -453,12 +464,20 @@ def create_snapshot_history(records, by_group, history_rows):
                     pieces.append(f"{gap}-day gap; not daily movement")
                 if signed_change < 0:
                     pieces.append("Signed count decreased; verify source/status correction")
+                # Keep later observations under a changed total visibly flagged for review.
+                under_revised_scope = bool(not total_changed and scope_since and current["total"] == scope_since[2])
+                if under_revised_scope:
+                    pieces.append(f"Under revised scope since {scope_since[0]:%d %b %Y} "
+                                  f"({scope_since[1]:g} → {scope_since[2]:g}); review")
                 if not pieces:
                     pieces.append("No scope change detected")
+            if total_changed:
+                scope_since = (current["date"], previous["total"], current["total"])
             trend[(current["date"], current["project"], current["group"])] = {
                 "signed": current["signed"], "total": current["total"], "pct": current_pct,
                 "change": change_text, "signed_change": signed_change, "pp_change": pp_change,
                 "total_changed": total_changed, "notes": pieces,
+                "revised_scope": under_revised_scope,
             }
             previous = current
 
@@ -487,7 +506,7 @@ def create_snapshot_history(records, by_group, history_rows):
             rows_to_write.append({"values": [item["date"], item["project"], item["group"], item["status"],
                                                units_total, signed_pct, change_text, "; ".join(x for x in notes if x)],
                                   "fill": row_fill, "change_color": change_color,
-                                  "scope": t["total_changed"]})
+                                  "scope": t["total_changed"], "revised": t["revised_scope"]})
         else:
             if status_lower in ("", "unclassified"):
                 note = "Blank/unclassified status; verify source"
@@ -502,7 +521,7 @@ def create_snapshot_history(records, by_group, history_rows):
             rows_to_write.append({"values": [item["date"], item["project"], item["group"], item["status"],
                                                unit_text, pct, "Not applicable", f"{item.get('raw') or ''}; {note}".strip("; ")],
                                   "fill": AMBER if status_lower in ("", "unclassified") else (WHITE if len(rows_to_write) % 2 == 0 else LIGHT),
-                                  "change_color": DARK, "scope": False})
+                                  "change_color": DARK, "scope": False, "revised": False})
 
     rows_to_write.sort(key=lambda x: (x["values"][0], str(x["values"][1]).casefold(),
                                       str(x["values"][2]).casefold(), str(x["values"][3]).casefold()))
@@ -519,6 +538,9 @@ def create_snapshot_history(records, by_group, history_rows):
             ws.cell(rr, 8).font = Font(name="Aptos", size=9, bold=True, color="C00000")
         elif row["values"][6] not in ("Baseline", "Not applicable"):
             ws.cell(rr, 7).fill = PatternFill("solid", fgColor="E2F0D9" if row["change_color"] == "16803D" else "FCE4D6" if row["change_color"] == "C00000" else "F7F8F4")
+        if row["revised"]:
+            ws.cell(rr, 8).fill = PatternFill("solid", fgColor=AMBER)
+            ws.cell(rr, 8).font = Font(name="Aptos", size=9, bold=True, color="B54708")
         ws.row_dimensions[rr].height = 30 if row["scope"] else 24
 
     last_row = max(header_row, header_row + len(rows_to_write))
@@ -536,14 +558,78 @@ def create_snapshot_history(records, by_group, history_rows):
     ws.print_title_rows = "1:3"
     wb.save(WEEKLY_OUT)
 
+def check_source_is_current(history_rows):
+    """Refuse to build reports from an analysis workbook older than the saved TEDUH history."""
+    teduh = ROOT / "data" / "teduh-history.json"
+    if not teduh.exists():
+        print("WARNING: data/teduh-history.json not found; freshness check skipped.")
+        return
+    saved = [str(r.get("date", ""))[:10] for r in json.loads(teduh.read_text(encoding="utf-8")).get("records", [])]
+    saved = [d for d in saved if len(d) == 10]
+    if not saved:
+        return
+    latest_saved = date.fromisoformat(max(saved))
+    latest_workbook = max((r["date"] for r in history_rows), default=None)
+    if latest_workbook is None or latest_workbook < latest_saved:
+        raise ValueError(f"{SOURCE.name} is stale: latest record {latest_workbook} but data/teduh-history.json "
+                         f"has {latest_saved}. Run scripts/export_competitor_workbook.mjs first.")
+
+
+def validate_outputs(records, groups, lookup):
+    """Re-open the written files and check daily, weekly and Snapshot History agree."""
+    problems = []
+    daily = load_workbook(DAILY_OUT, read_only=True)
+    expected_tab = month_name(TODAY.year, TODAY.month)
+    if daily.sheetnames != [expected_tab]:
+        problems.append(f"Daily workbook tabs are {daily.sheetnames}, expected only [{expected_tab!r}]")
+    ws = daily[daily.sheetnames[0]]
+    rows = list(ws.iter_rows(values_only=True))
+    for i, values in enumerate(rows):
+        label = str(values[0] or "")
+        if not label.endswith("· Sales Status"):
+            continue
+        dt = datetime.strptime(label.split(" · ")[0], "%d %b %Y").date()
+        for j, g in enumerate(groups, 1):
+            cur = lookup.get((dt, g))
+            want = status(cur) if cur else "No signed observation"
+            if values[j] != want:
+                problems.append(f"Daily {dt} {g}: {values[j]!r} != {want!r}")
+    daily.close()
+
+    weekly = load_workbook(WEEKLY_OUT, read_only=True)
+    if "Snapshot History" not in weekly.sheetnames:
+        problems.append("Weekly workbook has no Snapshot History tab")
+    if "Latest Snapshot Comparison" in weekly.sheetnames:
+        problems.append("Weekly workbook still has Latest Snapshot Comparison")
+    snap = set()
+    for values in weekly["Snapshot History"].iter_rows(min_row=4, values_only=True):
+        if values[0] is None:
+            continue
+        d = values[0].date() if isinstance(values[0], datetime) else values[0]
+        if str(values[3]).lower() == "signed":
+            snap.add((d, values[1], values[2], values[4]))
+    for r in records:
+        if (r["date"], r["project"], r["group"], f"{r['signed']:g} / {r['total']:g}") not in snap:
+            problems.append(f"Snapshot History is missing {r['date']} {r['project']} / {r['group']}")
+    weekly.close()
+
+    if problems:
+        for p in problems[:30]:
+            print(f"VALIDATION ERROR: {p}")
+        raise ValueError(f"{len(problems)} output validation problem(s); reports are not consistent.")
+    print(f"Validation: daily tab, Snapshot History and {len(records)} signed observations reconcile.")
+
+
 def main():
     records=read_records()
     if not records: raise ValueError("No valid signed records found in Historical Records.")
     history_rows=read_history_rows()
+    check_source_is_current(history_rows)
     groups, lookup, by_group = group_records(records)
     create_daily(records, groups, lookup, by_group)
     create_weekly(records, groups, lookup, by_group)
     create_snapshot_history(records, by_group, history_rows)
+    validate_outputs(records, groups, lookup)
     daily_tabs = load_workbook(DAILY_OUT, read_only=True).sheetnames
     weekly_tabs = load_workbook(WEEKLY_OUT, read_only=True).sheetnames
     print(f"Created {DAILY_OUT.name} with {len(daily_tabs)} tabs ({', '.join(daily_tabs)})")
