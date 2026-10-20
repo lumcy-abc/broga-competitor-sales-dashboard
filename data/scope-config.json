@@ -6,10 +6,34 @@
       "unitPrefix": "L",
       "releaseTargetGroup": "Group B · rear-kitchen layout",
       "groups": [
-        { "label": "Group A · front-kitchen layout", "ranges": [[1, 27]] },
-        { "label": "Group B · rear-kitchen layout", "ranges": [[28, 335]] }
+        {
+          "label": "Group A · front-kitchen layout",
+          "ranges": [
+            [
+              1,
+              27
+            ]
+          ]
+        },
+        {
+          "label": "Group B · rear-kitchen layout",
+          "ranges": [
+            [
+              28,
+              373
+            ]
+          ]
+        }
       ],
-      "confirmedReleases": []
+      "confirmedReleases": [
+        {
+          "range": "L336–L373",
+          "units": 38,
+          "group": "Group B · rear-kitchen layout",
+          "confirmedOn": "2026-10-20",
+          "issue": 1
+        }
+      ]
     }
   }
 }
