@@ -34,9 +34,13 @@ function componentsFor(r) {
   return [];
 }
 function groupLabel(data, project, component, index, components) {
-  // Springvale's 189-unit records are historical observations for Group B before its total increased to 308.
-  // Keep them in the same Group B column; the changing denominator is highlighted in history.
-  if (project === 'Springvale Sempurna Heights' && [189, 308].includes(Number(component.total))) return 'Group B · rear-kitchen layout';
+  // Match the revised source workbook's unit-group headers. Ignore the legacy Group 1 column.
+  // Historical 189-unit observations and later 308-unit observations both belong to Group B.
+  if (project === 'Springvale Sempurna Heights') {
+    const groupText = [component.groupLabel, component.unitGroup, component.group, component.layoutLabel, component.raw, component.label].filter(Boolean).join(' ').toLowerCase();
+    if (/group\s*a|front[- ]kitchen/.test(groupText) || Number(component.total) === 27) return 'Group A · front-kitchen layout';
+    if (/group\s*b|rear[- ]kitchen/.test(groupText) || Number(component.total) === 189 || Number(component.total) === 308) return 'Group B · rear-kitchen layout';
+  }
 
   const ruleGroups = data.scopeRules?.[project]?.groups ?? [];
   const total = Number(component.total);
@@ -291,26 +295,8 @@ for (const r of history) {
 }
 [15,32,32,17,14,14,12,46,24].forEach((width, i) => hs.getColumn(i + 1).width = width);
 hs.autoFilter = { from: { row: 1, column: 1 }, to: { row: hs.rowCount, column: histHeaders.length } };
-// Highlight a historical increase in total units within the same project/layout series.
-// This is a scope/release change, not a signed-sales increase.
-const previousTotals = new Map();
 for (let r = 2; r <= hs.rowCount; r++) {
-  const row = hs.getRow(r);
-  row.eachCell(cell => { cell.border = { bottom: { style: 'hair', color: 'FFE5E7EB' } }; cell.alignment = { vertical: 'top', wrapText: [3,8].includes(cell.col) }; });
-  const project = String(row.getCell(2).value ?? '');
-  const group = String(row.getCell(3).value ?? '');
-  const type = String(row.getCell(4).value ?? '');
-  const total = Number(row.getCell(6).value);
-  if (type !== 'Signed' || !Number.isFinite(total) || total <= 0) continue;
-  const key = `${project}|${group}`;
-  const prior = previousTotals.get(key);
-  if (prior && total > prior.total) {
-    const cell = row.getCell(6);
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE4B5' } };
-    cell.font = { bold: true, color: { argb: 'FF8A4B08' } };
-    cell.note = `Total units increased from ${prior.total} to ${total} compared with ${prior.date}. Review whether this reflects a newly released unit scope.`;
-  }
-  if (!prior || row.getCell(1).value >= prior.date) previousTotals.set(key, { total, date: row.getCell(1).value });
+  hs.getRow(r).eachCell(cell => { cell.border = { bottom: { style: 'hair', color: 'FFE5E7EB' } }; cell.alignment = { vertical: 'top', wrapText: [3,8].includes(cell.col) }; });
 }
 
 const readme = wb.addWorksheet('Read Me');
@@ -320,7 +306,7 @@ readme.addRows([
   ['Sales Unit','Signed units / total units, shown separately for every unit group. Groups are not combined into one total.'],
   ['Sales Status','Signed units divided by that group’s confirmed total, rounded to a whole percentage for display. Booking-only observations are not treated as zero signed sales.'],
   ['Weekly Change','The signed-unit change versus the weekly baseline. If the denominator changed, the workbook flags review instead of presenting a misleading sales change.'],
-  ['Scope','Birchpark remains four terrace groups and excludes rumah bandar. Sapphire uses the terrace-only comparison scope. Springvale Group A remains 27 units. Group B is one continuing historical series: earlier records used 189 total units before the release scope increased to 308; the change is highlighted for review, not split into a new group.'],
+  ['Scope','Birchpark remains four terrace groups and excludes rumah bandar. Sapphire uses the terrace-only comparison scope. Springvale keeps the 27-unit front-kitchen and 308-unit rear-kitchen groups separate.'],
   ['OneDrive destination','Use a separate file named Broga_Competitor_Sales_Analysis.xlsx. Do not overwrite the original source workbook.'],
 ]);
 readme.getColumn(1).width = 26; readme.getColumn(2).width = 115;
