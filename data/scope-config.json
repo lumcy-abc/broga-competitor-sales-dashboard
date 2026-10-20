@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "about": "Confirmed unit ranges for range-based comparison scopes. Read by the dashboard (index.html) and the daily collector (scripts/collect_teduh.mjs). Update through a 'Confirm release' GitHub issue, which runs scripts/apply_release_confirmation.mjs.",
+  "projects": {
+    "Springvale Sempurna Heights": {
+      "unitPrefix": "L",
+      "releaseTargetGroup": "Group B · rear-kitchen layout",
+      "groups": [
+        { "label": "Group A · front-kitchen layout", "ranges": [[1, 27]] },
+        { "label": "Group B · rear-kitchen layout", "ranges": [[28, 335]] }
+      ],
+      "confirmedReleases": []
+    }
+  }
+}

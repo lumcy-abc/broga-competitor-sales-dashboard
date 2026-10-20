@@ -17,6 +17,19 @@ const ENDPOINTS = [
   { project: 'Banyan @Setia Ecohill 2', id: '14421-22', total: 113 },
   { project: 'Amani Gallery Homes', id: '6868-20', total: 81 }
 ];
+// Confirmed unit ranges for range-based scopes. data/scope-config.json is updated by a
+// "Confirm release" GitHub issue; the default keeps the collector working without it.
+const DEFAULT_SCOPE = { 'Springvale Sempurna Heights': { unitPrefix: 'L', groups: [
+  { label: 'Group A · front-kitchen layout', ranges: [[1, 27]] },
+  { label: 'Group B · rear-kitchen layout', ranges: [[28, 335]] }
+] } };
+const SCOPE = await fs.readFile('data/scope-config.json', 'utf8')
+  .then(text => JSON.parse(text).projects ?? {})
+  .catch(err => { console.warn(`::warning::data/scope-config.json unavailable (${err.message}); using built-in unit ranges.`); return {}; });
+const scopeConfig = project => SCOPE[project] ?? DEFAULT_SCOPE[project];
+const rangeSize = g => g.ranges.reduce((n, [lo, hi]) => n + hi - lo + 1, 0);
+const rangeText = (g, p) => g.ranges.map(([lo, hi]) => lo === hi ? `${p}${lo}` : `${p}${lo}–${p}${hi}`).join(', ');
+for (const e of ENDPOINTS) { const cfg = scopeConfig(e.project); if (cfg) e.total = cfg.groups.reduce((n, g) => n + rangeSize(g), 0); }
 const BASE = 'https://teduh.kpkt.gov.my/api/unit-projek-swasta/';
 const MALAYSIA_DATE = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Kuala_Lumpur', year: 'numeric', month: '2-digit', day: '2-digit'
@@ -77,13 +90,19 @@ function exactCount(name, units, expected, groupName) {
 function makeComponents(endpoint, units) {
   const project = endpoint.project;
   if (endpoint.type === 'springvale') {
-    const a = units.filter(u => inRange(label(u), 1, 27, 'L'));
-    const b = units.filter(u => inRange(label(u), 28, 335, 'L'));
-    const excludedRelease = units.filter(u => inRange(label(u), 336, 373, 'L'));
-    if (excludedRelease.length) activeScopeWarnings.push(`Found ${excludedRelease.length} units in L336–L373 outside the confirmed comparison scope; review whether this release should be added.`);
-    exactCount(project, a, 27, 'Group A L1-L27');
-    exactCount(project, b, 308, 'Group B L28-L335');
-    return [[a,27,'Group A · front-kitchen layout'],[b,308,'Group B · rear-kitchen layout']].map(([list,total,group]) => component(list,total,group));
+    const cfg = scopeConfig(project), prefix = cfg.unitPrefix ?? 'L';
+    const inGroup = (u, g) => g.ranges.some(([lo, hi]) => inRange(label(u), lo, hi, prefix));
+    const outside = units.filter(u => !cfg.groups.some(g => inGroup(u, g)));
+    if (outside.length) {
+      const nums = outside.map(u => Number(label(u).match(/\d+/)?.[0])).filter(Number.isFinite).sort((a, b) => a - b);
+      const span = nums.length ? `${prefix}${nums[0]}–${prefix}${nums.at(-1)}` : 'unlabelled units';
+      activeScopeWarnings.push(`Found ${outside.length} units in ${span} outside the confirmed comparison scope; review whether this release should be added.`);
+    }
+    return cfg.groups.map(g => {
+      const list = units.filter(u => inGroup(u, g));
+      exactCount(project, list, rangeSize(g), `${g.label.split(' · ')[0]} ${rangeText(g, prefix)}`);
+      return component(list, rangeSize(g), g.label);
+    });
   }
   if (endpoint.type === 'mlegasi1') {
     const g1 = units.filter(u => inRange(label(u),1,102,'Z') || inRange(label(u),552,560,'Z'));

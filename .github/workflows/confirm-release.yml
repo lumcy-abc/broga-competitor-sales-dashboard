@@ -1,0 +1,70 @@
+name: Apply release confirmation
+
+# Opened from the dashboard's "Confirm release" button as a pre-filled issue.
+# Only issues opened by the repository owner or collaborators are applied.
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: scope-config
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: >-
+      startsWith(github.event.issue.title, 'Confirm release:') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Update data/scope-config.json
+        id: apply
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set +e
+          node scripts/apply_release_confirmation.mjs > result.txt 2>&1
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+          cat result.txt
+
+      - name: Commit the confirmed scope
+        id: commit
+        if: steps.apply.outputs.code == '0'
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/scope-config.json
+          git commit -m "Confirm unit release from issue #${ISSUE_NUMBER}"
+          git push
+
+      - name: Report back on the issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          APPLIED: ${{ steps.apply.outputs.code == '0' && steps.commit.outcome == 'success' }}
+        run: |
+          [ -f result.txt ] || echo "Not applied: the workflow failed before reading the issue." > result.txt
+          if [ "${{ steps.apply.outputs.code }}" = "0" ] && [ "$APPLIED" != "true" ]; then
+            echo "Not applied: the scope change could not be saved to GitHub (see the workflow log). Open a new confirmation to retry." > result.txt
+          fi
+          gh issue comment "$ISSUE_NUMBER" --body-file result.txt
+          if [ "$APPLIED" = "true" ]; then gh issue close "$ISSUE_NUMBER" --reason completed; fi
