@@ -1,8 +1,8 @@
 {
   "schemaVersion": 2,
   "lastRun": {
-    "timestamp": "2026-10-29T01:29:11.938Z",
-    "date": "2026-10-29",
+    "timestamp": "2026-10-30T01:31:59.136Z",
+    "date": "2026-10-30",
     "attempted": 12,
     "succeeded": 12,
     "failed": []
@@ -6426,6 +6426,478 @@
     {
       "project": "Zinnia Residences",
       "date": "2026-10-29",
+      "raw": "23% Signed (34/149 units)",
+      "components": [
+        {
+          "label": "Signed",
+          "units": 34,
+          "total": 149,
+          "configuredTotal": 149,
+          "scopeChanged": false,
+          "reportedPct": 23,
+          "raw": "34/149 signed",
+          "group": "All configured comparison units"
+        }
+      ],
+      "signed": 34,
+      "booked": 0,
+      "total": 149,
+      "signedPct": 22.818791946308725,
+      "apiUnitCount": 149,
+      "configuredTotal": 149,
+      "previousTotal": 149,
+      "totalChanged": false,
+      "apiUnitCountChanged": false,
+      "scopeWarnings": [],
+      "alerts": [],
+      "mappedId": "19959-3",
+      "static": {},
+      "source": "TEDUH API · scheduled snapshot"
+    },
+    {
+      "project": "Amani Gallery Homes",
+      "date": "2026-10-30",
+      "raw": "91% Signed (74/81 units)",
+      "components": [
+        {
+          "label": "Signed",
+          "units": 74,
+          "total": 81,
+          "configuredTotal": 81,
+          "scopeChanged": false,
+          "reportedPct": 91,
+          "raw": "74/81 signed",
+          "group": "All configured comparison units"
+        }
+      ],
+      "signed": 74,
+      "booked": 0,
+      "total": 81,
+      "signedPct": 91.35802469135803,
+      "apiUnitCount": 81,
+      "configuredTotal": 81,
+      "previousTotal": 81,
+      "totalChanged": false,
+      "apiUnitCountChanged": false,
+      "scopeWarnings": [],
+      "alerts": [],
+      "mappedId": "6868-20",
+      "static": {},
+      "source": "TEDUH API · scheduled snapshot"
+    },
+    {
+      "project": "Balau Homes 2A",
+      "date": "2026-10-30",
+      "raw": "61% Signed (69/113 units)",
+      "components": [
+        {
+          "label": "Signed",
+          "units": 69,
+          "total": 113,
+          "configuredTotal": 113,
+          "scopeChanged": false,
+          "reportedPct": 61,
+          "raw": "69/113 signed",
+          "group": "All configured comparison units"
+        }
+      ],
+      "signed": 69,
+      "booked": 0,
+      "total": 113,
+      "signedPct": 61.06194690265486,
+      "apiUnitCount": 113,
+      "configuredTotal": 113,
+      "previousTotal": 113,
+      "totalChanged": false,
+      "apiUnitCountChanged": false,
+      "scopeWarnings": [],
+      "alerts": [],
+      "mappedId": "20094-4",
+      "static": {},
+      "source": "TEDUH API · scheduled snapshot"
+    },
+    {
+      "project": "Balau Homes 2C",
+      "date": "2026-10-30",
+      "raw": "46% Signed (22/48 units)",
+      "components": [
+        {
+          "label": "Signed",
+          "units": 22,
+          "total": 48,
+          "configuredTotal": 48,
+          "scopeChanged": false,
+          "reportedPct": 46,
+          "raw": "22/48 signed",
+          "group": "All configured comparison units"
+        }
+      ],
+      "signed": 22,
+      "booked": 0,
+      "total": 48,
+      "signedPct": 45.83333333333333,
+      "apiUnitCount": 48,
+      "configuredTotal": 48,
+      "previousTotal": 48,
+      "totalChanged": false,
+      "apiUnitCountChanged": false,
+      "scopeWarnings": [],
+      "alerts": [],
+      "mappedId": "20094-5",
+      "static": {},
+      "source": "TEDUH API · scheduled snapshot"
+    },
+    {
+      "project": "Banyan @Setia Ecohill 2",
+      "date": "2026-10-30",
+      "raw": "63% Signed (71/113 units)",
+      "components": [
+        {
+          "label": "Signed",
+          "units": 71,
+          "total": 113,
+          "configuredTotal": 113,
+          "scopeChanged": false,
+          "reportedPct": 63,
+          "raw": "71/113 signed",
+          "group": "All configured comparison units"
+        }
+      ],
+      "signed": 71,
+      "booked": 0,
+      "total": 113,
+      "signedPct": 62.83185840707964,
+      "apiUnitCount": 113,
+      "configuredTotal": 113,
+      "previousTotal": 113,
+      "totalChanged": false,
+      "apiUnitCountChanged": false,
+      "scopeWarnings": [],
+      "alerts": [],
+      "mappedId": "14421-22",
+      "static": {},
+      "source": "TEDUH API · scheduled snapshot"
+    },
+    {
+      "project": "Birchpark @Eco Forest",
+      "date": "2026-10-30",
+      "raw": "100% Signed (46/46 units)\n100% Signed (56/56 units)\n100% Signed (25/25 units)\n40% Signed (10/25 units)",
+      "components": [
+        {
+          "label": "Signed",
+          "units": 46,
+          "total": 46,
+          "configuredTotal": 46,
+          "scopeChanged": false,
+          "reportedPct": 100,
+          "raw": "46/46 signed",
+          "group": "Group 57513"
+        },
+        {
+          "label": "Signed",
+          "units": 56,
+          "total": 56,
+          "configuredTotal": 56,
+          "scopeChanged": false,
+          "reportedPct": 100,
+          "raw": "56/56 signed",
+          "group": "Group 57514"
+        },
+        {
+          "label": "Signed",
+          "units": 25,
+          "total": 25,
+          "configuredTotal": 25,
+          "scopeChanged": false,
+          "reportedPct": 100,
+          "raw": "25/25 signed",
+          "group": "Group 57515"
+        },
+        {
+          "label": "Signed",
+          "units": 10,
+          "total": 25,
+          "configuredTotal": 25,
+          "scopeChanged": false,
+          "reportedPct": 40,
+          "raw": "10/25 signed",
+          "group": "Group 57516"
+        }
+      ],
+      "signed": 137,
+      "booked": 0,
+      "total": 152,
+      "signedPct": 90.13157894736842,
+      "apiUnitCount": 184,
+      "configuredTotal": 152,
+      "previousTotal": 152,
+      "totalChanged": false,
+      "apiUnitCountChanged": false,
+      "scopeWarnings": [],
+      "alerts": [],
+      "mappedId": "19150-17",
+      "static": {},
+      "source": "TEDUH API · scheduled snapshot"
+    },
+    {
+      "project": "Chorus @Setia Ecohill 2",
+      "date": "2026-10-30",
+      "raw": "78% Signed (77/99 units)",
+      "components": [
+        {
+          "label": "Signed",
+          "units": 77,
+          "total": 99,
+          "configuredTotal": 99,
+          "scopeChanged": false,
+          "reportedPct": 78,
+          "raw": "77/99 signed",
+          "group": "All configured comparison units"
+        }
+      ],
+      "signed": 77,
+      "booked": 0,
+      "total": 99,
+      "signedPct": 77.77777777777779,
+      "apiUnitCount": 99,
+      "configuredTotal": 99,
+      "previousTotal": 99,
+      "totalChanged": false,
+      "apiUnitCountChanged": false,
+      "scopeWarnings": [],
+      "alerts": [],
+      "mappedId": "14421-21",
+      "static": {},
+      "source": "TEDUH API · scheduled snapshot"
+    },
+    {
+      "project": "M Legasi Phase 1",
+      "date": "2026-10-30",
+      "raw": "100% Signed (111/111 units)\n97% Signed (134/138 units)\n98% Signed (79/81 units)",
+      "components": [
+        {
+          "label": "Signed",
+          "units": 111,
+          "total": 111,
+          "configuredTotal": 111,
+          "scopeChanged": false,
+          "reportedPct": 100,
+          "raw": "111/111 signed",
+          "group": "Group 1"
+        },
+        {
+          "label": "Signed",
+          "units": 134,
+          "total": 138,
+          "configuredTotal": 138,
+          "scopeChanged": false,
+          "reportedPct": 97,
+          "raw": "134/138 signed",
+          "group": "Group 2"
+        },
+        {
+          "label": "Signed",
+          "units": 79,
+          "total": 81,
+          "configuredTotal": 81,
+          "scopeChanged": false,
+          "reportedPct": 98,
+          "raw": "79/81 signed",
+          "group": "Group 3"
+        }
+      ],
+      "signed": 324,
+      "booked": 0,
+      "total": 330,
+      "signedPct": 98.18181818181819,
+      "apiUnitCount": 330,
+      "configuredTotal": 330,
+      "previousTotal": 330,
+      "totalChanged": false,
+      "apiUnitCountChanged": false,
+      "scopeWarnings": [],
+      "alerts": [],
+      "mappedId": "30897-1",
+      "static": {},
+      "source": "TEDUH API · scheduled snapshot"
+    },
+    {
+      "project": "M Legasi Phase 2",
+      "date": "2026-10-30",
+      "raw": "88% Signed (23/26 units)\n98% Signed (124/126 units)\n94% Signed (98/104 units)",
+      "components": [
+        {
+          "label": "Signed",
+          "units": 23,
+          "total": 26,
+          "configuredTotal": 26,
+          "scopeChanged": false,
+          "reportedPct": 88,
+          "raw": "23/26 signed",
+          "group": "Group 1"
+        },
+        {
+          "label": "Signed",
+          "units": 124,
+          "total": 126,
+          "configuredTotal": 126,
+          "scopeChanged": false,
+          "reportedPct": 98,
+          "raw": "124/126 signed",
+          "group": "Group 2"
+        },
+        {
+          "label": "Signed",
+          "units": 98,
+          "total": 104,
+          "configuredTotal": 104,
+          "scopeChanged": false,
+          "reportedPct": 94,
+          "raw": "98/104 signed",
+          "group": "Group 3"
+        }
+      ],
+      "signed": 245,
+      "booked": 0,
+      "total": 256,
+      "signedPct": 95.703125,
+      "apiUnitCount": 256,
+      "configuredTotal": 256,
+      "previousTotal": 256,
+      "totalChanged": false,
+      "apiUnitCountChanged": false,
+      "scopeWarnings": [],
+      "alerts": [],
+      "mappedId": "30897-2",
+      "static": {},
+      "source": "TEDUH API · scheduled snapshot"
+    },
+    {
+      "project": "M Legasi Phase 3",
+      "date": "2026-10-30",
+      "raw": "66% Signed (29/44 units)\n79% Signed (67/85 units)\n25% Signed (26/102 units)",
+      "components": [
+        {
+          "label": "Signed",
+          "units": 29,
+          "total": 44,
+          "configuredTotal": 44,
+          "scopeChanged": false,
+          "reportedPct": 66,
+          "raw": "29/44 signed",
+          "group": "Group 1"
+        },
+        {
+          "label": "Signed",
+          "units": 67,
+          "total": 85,
+          "configuredTotal": 85,
+          "scopeChanged": false,
+          "reportedPct": 79,
+          "raw": "67/85 signed",
+          "group": "Group 2"
+        },
+        {
+          "label": "Signed",
+          "units": 26,
+          "total": 102,
+          "configuredTotal": 102,
+          "scopeChanged": false,
+          "reportedPct": 25,
+          "raw": "26/102 signed",
+          "group": "Group 3"
+        }
+      ],
+      "signed": 122,
+      "booked": 0,
+      "total": 231,
+      "signedPct": 52.81385281385281,
+      "apiUnitCount": 231,
+      "configuredTotal": 231,
+      "previousTotal": 231,
+      "totalChanged": false,
+      "apiUnitCountChanged": false,
+      "scopeWarnings": [],
+      "alerts": [],
+      "mappedId": "30897-3",
+      "static": {},
+      "source": "TEDUH API · scheduled snapshot"
+    },
+    {
+      "project": "Sapphire Residence @Diamond City",
+      "date": "2026-10-30",
+      "raw": "33% Signed (45/136 units)",
+      "components": [
+        {
+          "label": "Signed",
+          "units": 45,
+          "total": 136,
+          "configuredTotal": 136,
+          "scopeChanged": false,
+          "reportedPct": 33,
+          "raw": "45/136 signed",
+          "group": "Rumah teres only"
+        }
+      ],
+      "signed": 45,
+      "booked": 0,
+      "total": 136,
+      "signedPct": 33.088235294117645,
+      "apiUnitCount": 449,
+      "configuredTotal": 136,
+      "previousTotal": 136,
+      "totalChanged": false,
+      "apiUnitCountChanged": false,
+      "scopeWarnings": [],
+      "alerts": [],
+      "mappedId": "13170-7",
+      "static": {},
+      "source": "TEDUH API · scheduled snapshot"
+    },
+    {
+      "project": "Springvale Sempurna Heights",
+      "date": "2026-10-30",
+      "raw": "4% Signed (1/27 units)\n47% Signed (161/346 units)",
+      "components": [
+        {
+          "label": "Signed",
+          "units": 1,
+          "total": 27,
+          "configuredTotal": 27,
+          "scopeChanged": false,
+          "reportedPct": 4,
+          "raw": "1/27 signed",
+          "group": "Group A · front-kitchen layout"
+        },
+        {
+          "label": "Signed",
+          "units": 161,
+          "total": 346,
+          "configuredTotal": 346,
+          "scopeChanged": false,
+          "reportedPct": 47,
+          "raw": "161/346 signed",
+          "group": "Group B · rear-kitchen layout"
+        }
+      ],
+      "signed": 162,
+      "booked": 0,
+      "total": 373,
+      "signedPct": 43.43163538873995,
+      "apiUnitCount": 373,
+      "configuredTotal": 373,
+      "previousTotal": 373,
+      "totalChanged": false,
+      "apiUnitCountChanged": false,
+      "scopeWarnings": [],
+      "alerts": [],
+      "mappedId": "19321-4",
+      "static": {},
+      "source": "TEDUH API · scheduled snapshot"
+    },
+    {
+      "project": "Zinnia Residences",
+      "date": "2026-10-30",
       "raw": "23% Signed (34/149 units)",
       "components": [
         {
