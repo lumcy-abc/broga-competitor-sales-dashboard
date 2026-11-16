@@ -22,6 +22,8 @@ DAILY_OUT = ROOT / "Broga_Daily_Tracking.xlsx"
 WEEKLY_OUT = ROOT / "Broga_Weekly_Tracking.xlsx"
 GREEN, BROWN, SAGE, CREAM = "526747", "8B6F4E", "E8EDE3", "F3EBDD"
 WHITE, DARK, GRAY, LINE, PALE, AMBER, LIGHT = "FFFFFF", "263126", "666666", "D7DCCF", "DCE8D5", "F6E5C9", "F7F8F4"
+UP_FILL, UP_FONT = "FFC7CE", "9C0006"      # weekly increase: light red fill, dark red text
+DOWN_FILL, DOWN_FONT = "FFD8A8", "C65911"  # weekly decrease: light orange fill, dark orange text
 TODAY = datetime.now(ZoneInfo("Asia/Kuala_Lumpur")).date()
 
 
@@ -396,8 +398,13 @@ def create_weekly(records, groups, lookup, by_group):
                         elif not cur: val="In progress" if start<=TODAY<=end else "No record this week"
                         elif not prev: val="Baseline / no prior-week record"
                         else: val=delta(cur,prev)
-                        fill=AMBER if "scope" in str(val).lower() else PALE if str(val).startswith(("+","No change")) else CREAM
-                    style_cell(ws.cell(rr,j,val),fill,kind=="change")
+                        fill=AMBER if "scope" in str(val).lower() else PALE if str(val).startswith("No change") else CREAM
+                    font=DARK
+                    if kind=="change" and "scope" not in str(val).lower():
+                        # User request 2026-11-16: increases red, decreases orange.
+                        if str(val).startswith("+"): fill, font = UP_FILL, UP_FONT
+                        elif str(val).startswith("-"): fill, font = DOWN_FILL, DOWN_FONT
+                    style_cell(ws.cell(rr,j,val),fill,kind=="change",color=font)
                 ws.row_dimensions[rr].height=32 if kind=="status" else 28; rr+=1
         ws.freeze_panes="B4"; ws.print_title_rows="1:3"
         outline_project_blocks(ws, groups, 4, rr - 1, header_row=2)
