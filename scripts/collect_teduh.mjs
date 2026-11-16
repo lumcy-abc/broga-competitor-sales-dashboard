@@ -179,11 +179,59 @@ function component(units,configuredTotal,label) {
   return { label:'Signed', units:count, total, configuredTotal, scopeChanged:total!==configuredTotal, reportedPct:total?Math.round(count/total*100):null, raw:`${count}/${total} signed`, group:label };
 }
 let store;
+const unitsByProject=new Map();
+
+// Unit price ledger (user request 2026-11-16): every unit's TEDUH list price (hargaJualan) and
+// signed SPA price (hargaSPJB), with a dated log of status and price changes. Units already sold
+// when tracking started have soldFirstSeen=null (sale date unknown).
+const PRICES = 'data/teduh-unit-prices.json';
+function money(v) {
+  const s = String(v ?? '').replace(/RM|,|\s/gi, '');
+  return /^\d+(\.\d+)?$/.test(s) ? Number(s) : null;
+}
+async function updatePriceLedger() {
+  const ledger = await fs.readFile(PRICES, 'utf8').then(JSON.parse).catch(err => {
+    if (err.code !== 'ENOENT') throw err;
+    return { schemaVersion: 1, about: 'Per-unit TEDUH prices. listPrice = hargaJualan; spjbPrice = hargaSPJB (price in the signed SPA; may exclude cash rebates). Written by scripts/collect_teduh.mjs.', trackingSince: MALAYSIA_DATE, projects: {}, changes: [] };
+  });
+  let added = 0, changed = 0;
+  for (const [project, { id, units }] of unitsByProject) {
+    const p = ledger.projects[project] ??= { teduhId: id, firstRun: MALAYSIA_DATE, units: {} };
+    const baseline = p.firstRun === MALAYSIA_DATE; // first run for this project: record state, log no changes
+    for (const u of units) {
+      // Unit numbers can repeat across TEDUH groups, so the key includes the group id.
+      const key = `${u.__groupId ?? '-'}|${label(u) || '?' + Object.keys(p.units).length}`;
+      const now = { group: u.__groupLabel, groupId: u.__groupId, status: sold(u) ? 'sold' : 'available',
+        listPrice: money(u.hargaJualan), spjbPrice: money(u.hargaSPJB), bumiQuota: u.kuota === true };
+      const prev = p.units[key];
+      if (!prev) {
+        p.units[key] = { ...now, firstSeen: MALAYSIA_DATE, lastSeen: MALAYSIA_DATE,
+          soldFirstSeen: now.status === 'sold' && !baseline ? MALAYSIA_DATE : null };
+        added++;
+        if (!baseline) ledger.changes.push({ date: MALAYSIA_DATE, project, unit: key, field: 'new unit', from: null, to: now.status });
+        continue;
+      }
+      for (const field of ['status', 'listPrice', 'spjbPrice']) {
+        if (prev[field] !== now[field] && prev.lastSeen !== MALAYSIA_DATE) {
+          ledger.changes.push({ date: MALAYSIA_DATE, project, unit: key, field, from: prev[field], to: now[field] });
+          changed++;
+        }
+      }
+      if (prev.status !== 'sold' && now.status === 'sold' && prev.lastSeen !== MALAYSIA_DATE) prev.soldFirstSeen = MALAYSIA_DATE;
+      Object.assign(prev, now, { lastSeen: MALAYSIA_DATE });
+    }
+  }
+  ledger.lastRun = MALAYSIA_DATE;
+  await fs.writeFile(PRICES, JSON.stringify(ledger, null, 1) + '\n');
+  console.log(`Price ledger: ${added} new unit(s), ${changed} change(s) logged; ${ledger.changes.length} changes since ${ledger.trackingSince}.`);
+}
+
 async function collect(endpoint) {
   const response=await fetch(BASE+endpoint.id,{headers:{Accept:'application/json'},signal:AbortSignal.timeout(25000)});
   if(!response.ok) throw new Error(`${endpoint.project} (${endpoint.id}): HTTP ${response.status}`);
   const data=await response.json();
   const units=flatten(groupsFrom(data));
+  unitsByProject.set(endpoint.project,{id:endpoint.id,units});
   activeScopeWarnings=[];
   const components=makeComponents(endpoint,units);
   const signed=components.reduce((n,c)=>n+c.units,0);
@@ -233,6 +281,8 @@ store.schemaVersion=2;
 store.lastRun={timestamp:new Date().toISOString(),date:MALAYSIA_DATE,attempted:ENDPOINTS.length,succeeded:collected.length,failed:failures};
 store.records=[...byKey.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.project.localeCompare(b.project));
 await fs.writeFile(OUT,JSON.stringify(store,null,2)+'\n');
+// The price ledger is extra: a failure here must not lose the day's sales snapshot.
+await updatePriceLedger().catch(err => console.warn(`::warning::Price ledger not updated: ${err?.message || err}`));
 console.log(`Saved ${collected.length}/${ENDPOINTS.length} observations for ${MALAYSIA_DATE}; ${failures.length} failed; ${store.records.length} dated records total.`);
 
 if (failures.length) console.warn(`::warning::${failures.length} TEDUH project(s) failed collection; the last valid records were retained.`);
