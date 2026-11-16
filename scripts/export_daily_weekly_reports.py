@@ -674,8 +674,9 @@ def create_master_view(history_rows):
     blocks = [(p, master_columns(p, history_rows)) for p in projects]
     width = max((len(c) for _, c in blocks), default=1) + 1
     title(ws, width, "BROGA COMPETITOR SALES STATUS | MASTER VIEW")
-    note = ws.cell(2, 1, f"Land Area, BUA, prices and rebate are as recorded on {DETAILS_DATE:%d/%m/%Y}; "
-                         "grey '—' = not in saved data / not re-checked. Sales Status after 13/10/2026 is the TEDUH "
+    note = ws.cell(2, 1, f"Land Area, BUA, prices and rebate are as recorded on {DETAILS_DATE:%d/%m/%Y} and carried "
+                         "forward unchanged (no updates since); grey '—' = earlier values not in saved data. "
+                         "Sales Status after 13/10/2026 is the TEDUH "
                          "reading for each Monday. Red = more units signed than the column to its right; orange = fewer. "
                          "'⚠ Total units changed' = % not directly comparable. Amber cell with a comment = the "
                          "recorded % does not match its units in the source; check the original.")
@@ -704,7 +705,8 @@ def create_master_view(history_rows):
                 font = Font(name="Aptos", size=10)
                 if key:
                     value = details.get(project, {}).get(key)
-                    if d == DETAILS_DATE and value not in (None, ""):
+                    # User 2026-11-16: no price updates since 13/10/2026, so later columns copy it exactly.
+                    if d >= DETAILS_DATE and value not in (None, ""):
                         value = str(value).strip()
                         # Same rule as the dashboard: rebates stored as fractions (0.1) show as 10%.
                         if key == "rebate" and re.fullmatch(r"0\.\d+", value):
@@ -779,11 +781,14 @@ def validate_master_view(blocks, records):
             header = sheet_rows[top][j]
             if header != d.strftime("%d/%m/%Y"):
                 problems.append(f"{project}: column {j} header {header!r} != {d:%d/%m/%Y}")
-            # Detail rows: values only in the 13/10/2026 column.
+            # Detail rows: 13/10/2026 and later columns copy the 13/10/2026 value exactly; older are "—".
+            base_j = next((jj for jj, (dd, _) in enumerate(cols, 1) if dd == DETAILS_DATE), None)
             for k in range(1, len(DETAIL_ROWS) + 1):
                 v = sheet_rows[top + k][j]
-                if d != DETAILS_DATE and v != "—":
-                    problems.append(f"{project} {d}: {sheet_rows[top + k][0]} has {v!r} outside {DETAILS_DATE}")
+                if d < DETAILS_DATE and v != "—":
+                    problems.append(f"{project} {d}: {sheet_rows[top + k][0]} has {v!r} before {DETAILS_DATE}")
+                if d > DETAILS_DATE and base_j and v != sheet_rows[top + k][base_j]:
+                    problems.append(f"{project} {d}: {sheet_rows[top + k][0]} {v!r} differs from {DETAILS_DATE} value")
             # Colour: red = more signed, orange = fewer, versus the older column.
             older = cols[j][1] if j < len(cols) else None
             want, _ = master_marks(rows, older)
