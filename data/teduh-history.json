@@ -1,10 +1,10 @@
 {
   "schemaVersion": 2,
   "lastRun": {
-    "timestamp": "2026-11-16T07:02:08.034Z",
+    "timestamp": "2026-11-16T08:14:10.279Z",
     "date": "2026-11-16",
-    "attempted": 12,
-    "succeeded": 12,
+    "attempted": 13,
+    "succeeded": 13,
     "failed": []
   },
   "records": [
@@ -14844,6 +14844,49 @@
       "scopeWarnings": [],
       "alerts": [],
       "mappedId": "30897-3",
+      "static": {},
+      "source": "TEDUH API · scheduled snapshot"
+    },
+    {
+      "project": "Majestic Flora",
+      "date": "2026-11-16",
+      "raw": "10% Signed (13/128 units)\n25% Signed (3/12 units)",
+      "components": [
+        {
+          "label": "Signed",
+          "units": 13,
+          "total": 128,
+          "configuredTotal": 128,
+          "scopeChanged": false,
+          "reportedPct": 10,
+          "raw": "13/128 signed",
+          "group": "20’ x 73’",
+          "groupId": "60014"
+        },
+        {
+          "label": "Signed",
+          "units": 3,
+          "total": 12,
+          "configuredTotal": 12,
+          "scopeChanged": false,
+          "reportedPct": 25,
+          "raw": "3/12 signed",
+          "group": "20’ x 80’",
+          "groupId": "60015"
+        }
+      ],
+      "signed": 16,
+      "booked": 0,
+      "total": 140,
+      "signedPct": 11.428571428571429,
+      "apiUnitCount": 140,
+      "configuredTotal": 140,
+      "previousTotal": null,
+      "totalChanged": false,
+      "apiUnitCountChanged": false,
+      "scopeWarnings": [],
+      "alerts": [],
+      "mappedId": "12069-7",
       "static": {},
       "source": "TEDUH API · scheduled snapshot"
     },
