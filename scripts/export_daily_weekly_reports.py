@@ -181,16 +181,14 @@ def scope_change_text(cur, prev):
 
 
 def delta(cur, prev):
-    """Describe the change against the previous valid observation, including its gap."""
+    """Describe the change against the previous week's latest observation.
+    No date/gap suffix: the week header gives the period (user decision 2026-11-16)."""
     if not cur: return "No record"
     if not prev: return "No prior record"
-    gap = (cur["date"] - prev["date"]).days
-    gap_label = f"over {gap} day(s)" if gap > 1 else "over 1 day"
     if cur["total"] != prev["total"]:
-        return f"{scope_change_text(cur, prev)} ({prev['date']:%d %b} → {cur['date']:%d %b}; {gap_label})"
+        return scope_change_text(cur, prev)
     n = int(cur["signed"] - prev["signed"])
-    change = "No change" if n == 0 else f"{n:+d} signed"
-    return f"{change} ({prev['date']:%d %b} → {cur['date']:%d %b}; {gap_label})"
+    return "No change" if n == 0 else f"{n:+d} signed"
 
 
 def daily_change_and_gap(cur, prev):
