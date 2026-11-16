@@ -588,6 +588,34 @@ DETAIL_ROWS = [("Land Area", "land area"), ("BUA", "bua"), ("SPA Price", "spa pr
 NOT_CHECKED = "EDEDED"
 
 
+def shared_details():
+    """Survey updates saved through 'Update details' issues: {project: [entries sorted by surveyDate]}."""
+    path = ROOT / "data" / "property-details.json"
+    if not path.exists():
+        return {}
+    projects = json.loads(path.read_text(encoding="utf-8")).get("projects", {})
+    return {p: sorted(v, key=lambda e: e["surveyDate"]) for p, v in projects.items()}
+
+
+def details_for(project, d, base, shared):
+    """Detail values in force on date d: the latest survey on or before d over the 13/10/2026 base.
+    Returns (values, source date) or (None, None) when nothing is known for that date."""
+    entries = [e for e in shared.get(project, []) if date.fromisoformat(e["surveyDate"]) <= d]
+    if entries:
+        return {**base.get(project, {}), **entries[-1]["details"]}, date.fromisoformat(entries[-1]["surveyDate"])
+    if d >= DETAILS_DATE:
+        return base.get(project, {}), DETAILS_DATE
+    return None, None
+
+
+def detail_text(key, value):
+    value = str(value).strip()
+    # Same rule as the dashboard: rebates stored as fractions (0.1) show as 10%.
+    if key == "rebate" and re.fullmatch(r"0\.\d+", value):
+        value = f"{float(value) * 100:g}%"
+    return value
+
+
 def master_columns(project, history_rows):
     """Columns for one project, newest first: manual snapshot dates plus one TEDUH reading per Monday.
 
@@ -666,6 +694,7 @@ def create_master_view(history_rows):
     """Add the Master View tab: one block per project, rows as in the original workbook."""
     data = dashboard_data()
     details = data.get("propertyDetails", {})
+    shared = shared_details()
     projects = data.get("projects", [])
     wb = load_workbook(WEEKLY_OUT)
     if MASTER_NAME in wb.sheetnames:
@@ -675,7 +704,8 @@ def create_master_view(history_rows):
     width = max((len(c) for _, c in blocks), default=1) + 1
     title(ws, width, "BROGA COMPETITOR SALES STATUS | MASTER VIEW")
     note = ws.cell(2, 1, f"Land Area, BUA, prices and rebate are as recorded on {DETAILS_DATE:%d/%m/%Y} and carried "
-                         "forward unchanged (no updates since); grey '—' = earlier values not in saved data. "
+                         "forward until a dated survey update ('Save for everyone' on the dashboard), which applies from "
+                         "its survey date; grey '—' = earlier values not in saved data. "
                          "Sales Status after 13/10/2026 is the TEDUH "
                          "reading for each Monday. Red = more units signed than the column to its right; orange = fewer. "
                          "'⚠ Total units changed' = % not directly comparable. Amber cell with a comment = the "
@@ -704,14 +734,11 @@ def create_master_view(history_rows):
                 cell = ws.cell(rr, j)
                 font = Font(name="Aptos", size=10)
                 if key:
-                    value = details.get(project, {}).get(key)
-                    # User 2026-11-16: no price updates since 13/10/2026, so later columns copy it exactly.
-                    if d >= DETAILS_DATE and value not in (None, ""):
-                        value = str(value).strip()
-                        # Same rule as the dashboard: rebates stored as fractions (0.1) show as 10%.
-                        if key == "rebate" and re.fullmatch(r"0\.\d+", value):
-                            value = f"{float(value) * 100:g}%"
-                        cell.value = value
+                    # Values carry forward from 13/10/2026 (user 2026-11-16) until a dated survey update.
+                    values, _ = details_for(project, d, details, shared)
+                    value = (values or {}).get(key)
+                    if value not in (None, ""):
+                        cell.value = detail_text(key, value)
                     else:
                         cell.value = "—"
                         cell.fill = PatternFill("solid", fgColor=NOT_CHECKED)
@@ -753,6 +780,10 @@ def validate_master_view(blocks, records):
     """Re-open Master View and reconcile it with the source data; stop on any mismatch."""
     problems = []
     data = dashboard_data()
+    base_details, shared = data.get("propertyDetails", {}), shared_details()
+    for p, entries in shared.items():
+        if p not in data.get("projects", []):
+            problems.append(f"data/property-details.json has unknown project {p!r}")
     ws = load_workbook(WEEKLY_OUT)[MASTER_NAME]
     cells = [list(r) for r in ws.iter_rows()]
     sheet_rows = [[c.value for c in r] for r in cells]
@@ -781,14 +812,15 @@ def validate_master_view(blocks, records):
             header = sheet_rows[top][j]
             if header != d.strftime("%d/%m/%Y"):
                 problems.append(f"{project}: column {j} header {header!r} != {d:%d/%m/%Y}")
-            # Detail rows: 13/10/2026 and later columns copy the 13/10/2026 value exactly; older are "—".
-            base_j = next((jj for jj, (dd, _) in enumerate(cols, 1) if dd == DETAILS_DATE), None)
-            for k in range(1, len(DETAIL_ROWS) + 1):
+            # Detail rows: each cell shows the value in force on that date (13/10/2026 base or a later
+            # dated survey update); dates before any known value show "—".
+            values, _ = details_for(project, d, base_details, shared)
+            for k, (label, key) in enumerate(DETAIL_ROWS, 1):
                 v = sheet_rows[top + k][j]
-                if d < DETAILS_DATE and v != "—":
-                    problems.append(f"{project} {d}: {sheet_rows[top + k][0]} has {v!r} before {DETAILS_DATE}")
-                if d > DETAILS_DATE and base_j and v != sheet_rows[top + k][base_j]:
-                    problems.append(f"{project} {d}: {sheet_rows[top + k][0]} {v!r} differs from {DETAILS_DATE} value")
+                raw = (values or {}).get(key)
+                want = detail_text(key, raw) if raw not in (None, "") else "—"
+                if v != want:
+                    problems.append(f"{project} {d}: {label} {v!r} != expected {want!r}")
             # Colour: red = more signed, orange = fewer, versus the older column.
             older = cols[j][1] if j < len(cols) else None
             want, _ = master_marks(rows, older)
