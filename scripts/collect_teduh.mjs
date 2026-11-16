@@ -15,7 +15,11 @@ const ENDPOINTS = [
   { project: 'Birchpark @Eco Forest', id: '19150-17', total: 152, type: 'birchpark' },
   { project: 'Chorus @Setia Ecohill 2', id: '14421-21', total: 99 },
   { project: 'Banyan @Setia Ecohill 2', id: '14421-22', total: 113 },
-  { project: 'Amani Gallery Homes', id: '6868-20', total: 81 }
+  { project: 'Amani Gallery Homes', id: '6868-20', total: 81 },
+  // Added 2026-11-16 (TEDUH name RESIDENSI FLORA). Layouts mapped by TEDUH group, confirmed by the
+  // user from list prices: 60014 ≈ RM 777k (20' x 73' SPA RM 776k), 60015 ≈ RM 812k (20' x 80').
+  { project: 'Majestic Flora', id: '12069-7', total: 140, type: 'apigroups',
+    groups: [['60014', 128, '20’ x 73’'], ['60015', 12, '20’ x 80’']] }
 ];
 // Confirmed unit ranges for range-based scopes. data/scope-config.json is updated by a
 // "Confirm release" GitHub issue; the default keeps the collector working without it.
@@ -124,6 +128,17 @@ function makeComponents(endpoint, units) {
       const end=i===sizes.length-1?units.length:Math.min(units.length,offset+size);
       const groupUnits=units.slice(offset,end); offset=end;
       return component(groupUnits,size,`Group ${i+1}`);
+    });
+  }
+  if (endpoint.type === 'apigroups') {
+    // One component per configured TEDUH group (pembangunan_id), in the land-area order.
+    const known = new Set(endpoint.groups.map(([id]) => id));
+    const unknown = [...new Set(units.map(u => String(u.__groupId ?? '')).filter(id => !known.has(id)))];
+    if (unknown.length) activeScopeWarnings.push(`New or unconfigured TEDUH group(s): ${unknown.join(', ')}; review scope before including them.`);
+    return endpoint.groups.map(([id, total, layout]) => {
+      const list = units.filter(u => String(u.__groupId ?? '') === id);
+      exactCount(project, list, total, `${layout} (TEDUH group ${id})`);
+      return { ...component(list, total, layout), groupId: id };
     });
   }
   if (endpoint.type === 'terrace' || endpoint.type === 'birchpark') {
