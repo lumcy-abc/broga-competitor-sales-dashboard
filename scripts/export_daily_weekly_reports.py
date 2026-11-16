@@ -565,12 +565,190 @@ def create_snapshot_history(records, by_group, history_rows):
     wb.save(WEEKLY_OUT)
 
 
-def dashboard_endpoint_codes():
-    """TEDUH codes the dashboard collects, read from the DATA object embedded in index.html."""
+def dashboard_data():
+    """The DATA object embedded in index.html (projects, endpoints, property details)."""
     html = (ROOT / "index.html").read_text(encoding="utf-8")
     start = html.index("const DATA=") + len("const DATA=")
     end = start + re.search(r";\r?\nconst \$", html[start:]).start()
-    return {e["project"]: e["id"] for e in json.loads(html[start:end]).get("endpoints", [])}
+    return json.loads(html[start:end])
+
+
+def dashboard_endpoint_codes():
+    """TEDUH codes the dashboard collects, read from the DATA object embedded in index.html."""
+    return {e["project"]: e["id"] for e in dashboard_data().get("endpoints", [])}
+
+
+# Master View: the original "Broga Competitor Sales Status" block layout (user request 2026-11-16).
+MASTER_NAME = "Master View"
+DETAILS_DATE = date(2026, 10, 13)       # property details in index.html come from the 13/10/2026 workbook
+MASTER_TEDUH_FROM = date(2026, 10, 19)  # first Monday after the last manual snapshot
+DETAIL_ROWS = [("Land Area", "land area"), ("BUA", "bua"), ("SPA Price", "spa price"),
+               ("Nett Price", "nett price"), ("Rebate", "rebate")]
+NOT_CHECKED = "EDEDED"
+
+
+def master_columns(project, history_rows):
+    """Columns for one project, newest first: manual snapshot dates plus one TEDUH reading per Monday.
+
+    Each column is (date, [history rows]). A Monday with no reading uses the latest TEDUH
+    reading in the 6 days before it; the header shows the date actually used.
+    """
+    rows = [r for r in history_rows if r["project"] == project]
+    manual = defaultdict(list)
+    teduh = defaultdict(list)
+    for r in rows:
+        (manual if r["source"].startswith("Embedded") else teduh)[r["date"]].append(r)
+    cols = dict(manual)
+    monday = MASTER_TEDUH_FROM
+    while monday <= TODAY:
+        used = max((d for d in teduh if monday - timedelta(days=6) <= d <= monday), default=None)
+        if used and used not in cols:
+            cols[used] = teduh[used]
+        monday += timedelta(days=7)
+    return sorted(cols.items(), key=lambda kv: kv[0], reverse=True)
+
+
+def master_status_text(rows):
+    """Sales Status cell: the recorded text for manual snapshots, the TEDUH count otherwise.
+    Multi-layout projects list one line per layout, prefixed with the layout name."""
+    rows = sorted(rows, key=lambda r: r["group"].casefold())
+    lines = []
+    for r in rows:
+        if r["source"].startswith("Embedded") and r["raw"]:
+            text = r["raw"].replace("\n", " ")
+        elif r["signed"] is not None and r["total"]:
+            text = status(r)
+        else:
+            text = r["raw"] or r["status"]
+        lines.append(f"{r['group']}: {text}" if len(rows) > 1 else text.replace(" (", "\n(", 1))
+    return "\n".join(lines)
+
+
+def project_signed(rows):
+    vals = [r for r in rows if str(r["status"]).lower() == "signed" and r["signed"] is not None]
+    return sum(r["signed"] for r in vals) if vals else None
+
+
+def create_master_view(history_rows):
+    """Add the Master View tab: one block per project, rows as in the original workbook."""
+    data = dashboard_data()
+    details = data.get("propertyDetails", {})
+    projects = data.get("projects", [])
+    wb = load_workbook(WEEKLY_OUT)
+    if MASTER_NAME in wb.sheetnames:
+        del wb[MASTER_NAME]
+    ws = wb.create_sheet(MASTER_NAME, 0)
+    blocks = [(p, master_columns(p, history_rows)) for p in projects]
+    width = max((len(c) for _, c in blocks), default=1) + 1
+    title(ws, width, "BROGA COMPETITOR SALES STATUS | MASTER VIEW")
+    note = ws.cell(2, 1, f"Land Area, BUA, prices and rebate are as recorded on {DETAILS_DATE:%d/%m/%Y}; "
+                         "grey '—' = not in saved data / not re-checked. Sales Status after 13/10/2026 is the TEDUH "
+                         "reading for each Monday. Red = more units signed than the column to its right.")
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=width)
+    note.font = Font(name="Aptos", size=9, italic=True, color=GRAY)
+    note.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    ws.row_dimensions[2].height = 30
+    thin, thick = Side(style="thin", color="000000"), Side(style="medium", color="000000")
+    rr = 4
+    for project, cols in blocks:
+        header = ws.cell(rr, 1, project)
+        header.font = Font(name="Aptos", size=10, bold=True)
+        for j, (d, _) in enumerate(cols, 2):
+            ws.cell(rr, j, d.strftime("%d/%m/%Y")).font = Font(name="Aptos", size=10)
+        for j in range(1, len(cols) + 2):
+            ws.cell(rr, j).border = Border(left=thin, right=thin, top=thick, bottom=thin)
+            ws.cell(rr, j).alignment = Alignment(vertical="top")
+        for label, key in DETAIL_ROWS + [("Sales Status", None)]:
+            rr += 1
+            ws.cell(rr, 1, label).font = Font(name="Aptos", size=10)
+            ws.cell(rr, 1).border = Border(left=thin, right=thin, top=thin, bottom=thin)
+            ws.cell(rr, 1).alignment = Alignment(vertical="top")
+            lines = 1
+            for j, (d, rows) in enumerate(cols, 2):
+                cell = ws.cell(rr, j)
+                font = Font(name="Aptos", size=10)
+                if key:
+                    value = details.get(project, {}).get(key)
+                    if d == DETAILS_DATE and value not in (None, ""):
+                        value = str(value).strip()
+                        # Same rule as the dashboard: rebates stored as fractions (0.1) show as 10%.
+                        if key == "rebate" and re.fullmatch(r"0\.\d+", value):
+                            value = f"{float(value) * 100:g}%"
+                        cell.value = value
+                    else:
+                        cell.value = "—"
+                        cell.fill = PatternFill("solid", fgColor=NOT_CHECKED)
+                        font = Font(name="Aptos", size=10, color=GRAY)
+                else:
+                    cell.value = master_status_text(rows)
+                    older = cols[j - 1][1] if j - 1 < len(cols) else None
+                    now, before = project_signed(rows), project_signed(older) if older else None
+                    if now is not None and before is not None and now > before:
+                        font = Font(name="Aptos", size=10, color="FF0000")
+                cell.font = font
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+                cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
+                lines = max(lines, str(cell.value).count("\n") + 1)
+            ws.row_dimensions[rr].height = max(15, 14 * lines)
+        rr += 2
+    ws.column_dimensions["A"].width = 30
+    for j in range(2, width + 1):
+        ws.column_dimensions[get_column_letter(j)].width = 30
+    ws.freeze_panes = "B4"
+    # Inserting at position 0 shifts the tabs; keep the newest monthly tab as the one that opens.
+    months = [s for s in wb.sheetnames if re.fullmatch(r"[A-Z][a-z]{2} \d{4}", s)]
+    for sheet in wb.worksheets:
+        sheet.sheet_view.tabSelected = False
+    if months:
+        wb.active = wb.sheetnames.index(months[-1])
+        wb[months[-1]].sheet_view.tabSelected = True
+    wb.save(WEEKLY_OUT)
+    return blocks
+
+
+def validate_master_view(blocks, records):
+    """Re-open Master View and reconcile it with the source data; stop on any mismatch."""
+    problems = []
+    data = dashboard_data()
+    ws = load_workbook(WEEKLY_OUT, read_only=True)[MASTER_NAME]
+    sheet_rows = list(ws.iter_rows(values_only=True))
+    found = {}
+    for i, values in enumerate(sheet_rows):
+        if values and values[0] in data.get("projects", []):
+            found[values[0]] = i
+    missing = [p for p in data.get("projects", []) if p not in found]
+    if missing:
+        problems.append(f"Master View has no block for {missing}")
+    signed_by = defaultdict(float)
+    total_by = defaultdict(float)
+    for r in records:
+        signed_by[(r["date"], r["project"])] += r["signed"]
+        total_by[(r["date"], r["project"])] += r["total"]
+    checked = 0
+    for project, cols in blocks:
+        if project not in found:
+            continue
+        top = found[project]
+        status_row = sheet_rows[top + len(DETAIL_ROWS) + 1]
+        if status_row[0] != "Sales Status":
+            problems.append(f"{project}: Sales Status row is not where expected")
+            continue
+        for j, (d, rows) in enumerate(cols, 1):
+            header = sheet_rows[top][j]
+            if header != d.strftime("%d/%m/%Y"):
+                problems.append(f"{project}: column {j} header {header!r} != {d:%d/%m/%Y}")
+            if d > DETAILS_DATE and (d, project) not in signed_by:
+                problems.append(f"{project} {d}: TEDUH column has no signed TEDUH record to reconcile")
+            elif d > DETAILS_DATE:
+                nums = [tuple(map(int, m)) for m in re.findall(r"\((\d+)/(\d+) units\)", str(status_row[j]))]
+                if (sum(a for a, _ in nums), sum(b for _, b in nums)) != (signed_by[(d, project)], total_by[(d, project)]):
+                    problems.append(f"{project} {d}: Master View {nums} != TEDUH {signed_by[(d, project)]:g}/{total_by[(d, project)]:g}")
+                checked += 1
+    if problems:
+        for p in problems[:30]:
+            print(f"VALIDATION ERROR: {p}")
+        raise ValueError(f"{len(problems)} Master View validation problem(s).")
+    print(f"Validation: Master View has all {len(found)} projects; {checked} TEDUH Monday cells reconcile.")
 
 
 def create_reference_sheet():
@@ -685,7 +863,9 @@ def main():
     create_weekly(records, groups, lookup, by_group)
     create_snapshot_history(records, by_group, history_rows)
     create_reference_sheet()
+    blocks = create_master_view(history_rows)
     validate_outputs(records, groups, lookup)
+    validate_master_view(blocks, records)
     daily_tabs = load_workbook(DAILY_OUT, read_only=True).sheetnames
     weekly_tabs = load_workbook(WEEKLY_OUT, read_only=True).sheetnames
     print(f"Created {DAILY_OUT.name} with {len(daily_tabs)} tabs ({', '.join(daily_tabs)})")
