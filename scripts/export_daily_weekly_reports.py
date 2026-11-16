@@ -14,6 +14,7 @@ from calendar import monthrange
 from zoneinfo import ZoneInfo
 from openpyxl import load_workbook, Workbook
 from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+from openpyxl.comments import Comment
 from openpyxl.utils import get_column_letter
 
 ROOT = Path.cwd()
@@ -629,6 +630,38 @@ def project_signed(rows):
     return sum(r["signed"] for r in vals) if vals else None
 
 
+def project_total(rows):
+    vals = [r["total"] for r in rows if r["total"] is not None]
+    return sum(vals) if vals else None
+
+
+MASTER_UP, MASTER_DOWN = "FF0000", DOWN_FONT  # red = more signed, orange = fewer (user 2026-11-16)
+
+
+def master_marks(rows, older):
+    """Font colour and total-change note for a Sales Status cell versus the older column."""
+    now, before = project_signed(rows), project_signed(older) if older else None
+    color = MASTER_UP if (now is not None and before is not None and now > before) else \
+        MASTER_DOWN if (now is not None and before is not None and now < before) else None
+    t_now, t_before = project_total(rows), project_total(older) if older else None
+    note = (f"⚠ Total units changed ({t_before:g} → {t_now:g})"
+            if t_now is not None and t_before is not None and t_now != t_before else None)
+    return color, note
+
+
+def pct_mismatches(rows):
+    """Manual snapshots whose recorded % does not match their own units, e.g. '25% Signed (81/189 units)'."""
+    out = []
+    for r in rows:
+        m = re.search(r"(\d+(?:\.\d+)?)%\s*\w+[^(]*\((\d+)/(\d+) units\)", str(r["raw"]).replace("\n", " "))
+        if m and int(m.group(3)) > 0:
+            pct, a, b = float(m.group(1)), int(m.group(2)), int(m.group(3))
+            calc = a / b * 100
+            if abs(round(calc) - pct) > 1:
+                out.append(f"{r['group']}: recorded {pct:g}% but {a}/{b} = {calc:.0f}%")
+    return out
+
+
 def create_master_view(history_rows):
     """Add the Master View tab: one block per project, rows as in the original workbook."""
     data = dashboard_data()
@@ -643,7 +676,9 @@ def create_master_view(history_rows):
     title(ws, width, "BROGA COMPETITOR SALES STATUS | MASTER VIEW")
     note = ws.cell(2, 1, f"Land Area, BUA, prices and rebate are as recorded on {DETAILS_DATE:%d/%m/%Y}; "
                          "grey '—' = not in saved data / not re-checked. Sales Status after 13/10/2026 is the TEDUH "
-                         "reading for each Monday. Red = more units signed than the column to its right.")
+                         "reading for each Monday. Red = more units signed than the column to its right; orange = fewer. "
+                         "'⚠ Total units changed' = % not directly comparable. Amber cell with a comment = the "
+                         "recorded % does not match its units in the source; check the original.")
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=width)
     note.font = Font(name="Aptos", size=9, italic=True, color=GRAY)
     note.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
@@ -680,11 +715,17 @@ def create_master_view(history_rows):
                         cell.fill = PatternFill("solid", fgColor=NOT_CHECKED)
                         font = Font(name="Aptos", size=10, color=GRAY)
                 else:
-                    cell.value = master_status_text(rows)
                     older = cols[j - 1][1] if j - 1 < len(cols) else None
-                    now, before = project_signed(rows), project_signed(older) if older else None
-                    if now is not None and before is not None and now > before:
-                        font = Font(name="Aptos", size=10, color="FF0000")
+                    color, total_note = master_marks(rows, older)
+                    text = master_status_text(rows)
+                    cell.value = f"{text}\n{total_note}" if total_note else text
+                    if color:
+                        font = Font(name="Aptos", size=10, color=color)
+                    mismatch = pct_mismatches(rows)
+                    if mismatch:
+                        cell.comment = Comment("Source % does not match units; check original workbook.\n"
+                                               + "\n".join(mismatch), "Report check")
+                        cell.fill = PatternFill("solid", fgColor=AMBER)
                 cell.font = font
                 cell.alignment = Alignment(vertical="top", wrap_text=True)
                 cell.border = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -710,8 +751,9 @@ def validate_master_view(blocks, records):
     """Re-open Master View and reconcile it with the source data; stop on any mismatch."""
     problems = []
     data = dashboard_data()
-    ws = load_workbook(WEEKLY_OUT, read_only=True)[MASTER_NAME]
-    sheet_rows = list(ws.iter_rows(values_only=True))
+    ws = load_workbook(WEEKLY_OUT)[MASTER_NAME]
+    cells = [list(r) for r in ws.iter_rows()]
+    sheet_rows = [[c.value for c in r] for r in cells]
     found = {}
     for i, values in enumerate(sheet_rows):
         if values and values[0] in data.get("projects", []):
@@ -737,6 +779,25 @@ def validate_master_view(blocks, records):
             header = sheet_rows[top][j]
             if header != d.strftime("%d/%m/%Y"):
                 problems.append(f"{project}: column {j} header {header!r} != {d:%d/%m/%Y}")
+            # Detail rows: values only in the 13/10/2026 column.
+            for k in range(1, len(DETAIL_ROWS) + 1):
+                v = sheet_rows[top + k][j]
+                if d != DETAILS_DATE and v != "—":
+                    problems.append(f"{project} {d}: {sheet_rows[top + k][0]} has {v!r} outside {DETAILS_DATE}")
+            # Colour: red = more signed, orange = fewer, versus the older column.
+            older = cols[j][1] if j < len(cols) else None
+            want, _ = master_marks(rows, older)
+            got = cells[top + len(DETAIL_ROWS) + 1][j].font.color
+            got = str(got.rgb)[-6:] if got is not None and got.rgb else None
+            if (want or None) != (got if got in (MASTER_UP, MASTER_DOWN) else None):
+                problems.append(f"{project} {d}: font colour {got} != expected {want}")
+            # Manual columns: every recorded unit count appears in the cell.
+            if d <= DETAILS_DATE:
+                for r in rows:
+                    m = re.search(r"\((\d+)/(\d+) units\)", str(r["raw"]).replace("\n", " "))
+                    if m and f"({m.group(1)}/{m.group(2)} units)" not in str(status_row[j]):
+                        problems.append(f"{project} {d}: {r['group']} {m.group(0)} missing from Master View")
+                checked_manual = True
             if d > DETAILS_DATE and (d, project) not in signed_by:
                 problems.append(f"{project} {d}: TEDUH column has no signed TEDUH record to reconcile")
             elif d > DETAILS_DATE:
