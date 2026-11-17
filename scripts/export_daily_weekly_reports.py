@@ -705,7 +705,7 @@ def create_master_view(history_rows):
     title(ws, width, "BROGA COMPETITOR SALES STATUS | MASTER VIEW")
     note = ws.cell(2, 1, f"Land Area, BUA, prices and rebate are as recorded on {DETAILS_DATE:%d/%m/%Y} and carried "
                          "forward until a dated survey update ('Save for everyone' on the dashboard), which applies from "
-                         "its survey date; grey '—' = earlier values not in saved data. "
+                         "its survey date ('None' = no longer applies); grey '—' = earlier values not in saved data. "
                          "Sales Status after 13/10/2026 is the TEDUH "
                          "reading for each Monday. Red = more units signed than the column to its right; orange = fewer. "
                          "'⚠ Total units changed' = % not directly comparable. Amber cell with a comment = the "
@@ -784,6 +784,9 @@ def validate_master_view(blocks, records):
     for p, entries in shared.items():
         if p not in data.get("projects", []):
             problems.append(f"data/property-details.json has unknown project {p!r}")
+        for e in entries:
+            if date.fromisoformat(e["surveyDate"]) < DETAILS_DATE:
+                problems.append(f"data/property-details.json: {p} survey {e['surveyDate']} is before {DETAILS_DATE}")
     ws = load_workbook(WEEKLY_OUT)[MASTER_NAME]
     cells = [list(r) for r in ws.iter_rows()]
     sheet_rows = [[c.value for c in r] for r in cells]

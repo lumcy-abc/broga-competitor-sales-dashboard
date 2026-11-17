@@ -29,7 +29,8 @@ for (const line of lines) {
   if (current && current !== 'end') details[current] = details[current] === undefined ? line : `${details[current]}\n${line}`;
 }
 for (const k of Object.keys(details)) details[k] = details[k].trim();
-for (const k of Object.keys(details)) if (!details[k]) delete details[k];
+// Blank = keep the previous value (field not recorded in this survey); "none" = no longer applies.
+for (const k of Object.keys(details)) if (!details[k]) delete details[k]; else if (/^none$/i.test(details[k])) details[k] = 'None';
 
 const html = await fs.readFile('index.html', 'utf8');
 const start = html.indexOf('const DATA=') + 'const DATA='.length;
@@ -39,6 +40,8 @@ if (!data.projects.includes(project)) fail(`"${project}" is not a dashboard proj
 if (!/^\d{4}-\d{2}-\d{2}$/.test(surveyDate) || Number.isNaN(Date.parse(surveyDate))) fail(`survey date "${surveyDate}" must be YYYY-MM-DD.`);
 const todayMY = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kuala_Lumpur' }).format(new Date());
 if (surveyDate > todayMY) fail(`survey date ${surveyDate} is in the future.`);
+// Values before 13/10/2026 are unknown; a partial survey then would be mixed with later base values.
+if (surveyDate < '2026-10-13') fail(`survey date ${surveyDate} is before 13/10/2026, the earliest recorded details.`);
 if (!Object.keys(details).length) fail('no detail values were filled in.');
 
 const store = await fs.readFile(FILE, 'utf8').then(JSON.parse).catch(err => {
@@ -53,4 +56,4 @@ list.sort((a, b) => a.surveyDate.localeCompare(b.surveyDate));
 await fs.writeFile(FILE, JSON.stringify(store, null, 2) + '\n');
 
 const shown = Object.entries(details).map(([k, v]) => `- **${k}**: ${v.replace(/\n/g, ' / ')}`).join('\n');
-console.log(`Applied: ${project} details for survey date ${surveyDate}${replaced >= 0 ? ' (replaced the earlier entry for that date)' : ''}.\n\n${shown}\n\nThe dashboard shows them on its next refresh; the weekly Excel Master View uses them from ${surveyDate} onwards after its next run.`);
+console.log(`Applied: ${project} details for survey date ${surveyDate}${replaced >= 0 ? ' (replaced the earlier entry for that date)' : ''}.\n\n${shown}\n\nFields not listed keep their previous values. The dashboard shows these on its next refresh; the weekly Excel Master View uses them from the first column on or after ${surveyDate} at its next daily run (09:00 Malaysia time). Remarks are kept for the dashboard only (the Master View has no Remarks row).`);
