@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "about": "Survey updates to land area, BUA, SPA, nett price, rebate and remarks, saved from the dashboard through \"Update details\" GitHub issues. Base values (13/10/2026) live in index.html.",
+  "projects": {
+    "Balau Homes 2A": [
+      {
+        "surveyDate": "2026-11-16",
+        "details": {
+          "rebate": "TEST 99% (will be reverted)"
+        },
+        "issue": 2,
+        "savedOn": "2026-11-17"
+      }
+    ]
+  }
+}
